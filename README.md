@@ -13,8 +13,8 @@ FileJack is an MCP server that provides secure file I/O capabilities through a J
 - ✅ **Advanced Access Control**: Fine-grained filesystem access control with configurable policies
 - ✅ **Secure Operations**: Path-based restrictions, extension filtering, and file size limits
 - ✅ **Configuration File Support**: JSON-based configuration for access policies
-- ✅ **Comprehensive Testing**: 40+ unit tests and 8 integration tests
-- ✅ **Error Handling**: Detailed error reporting with proper error codes
+- ✅ **Comprehensive Testing**: 72 tests (64 unit + 8 integration)
+- ✅ **Error Handling**: Detailed error reporting with helpful messages and debugging logs
 - ✅ **Auto-create Directories**: Automatically creates parent directories when writing files
 - ✅ **UTF-8 Support**: Full Unicode support including emojis
 - ✅ **Read-Only Mode**: Support for read-only filesystem access
@@ -106,6 +106,9 @@ FileJack includes comprehensive access control to prevent misuse. See [ACCESS_CO
 
 Read contents from a file.
 
+**Parameters:**
+- `path` (string, required) - Path to the file to read
+
 **Request:**
 ```json
 {
@@ -136,6 +139,10 @@ Read contents from a file.
 #### 2. write_file
 
 Write contents to a file (creates parent directories if needed).
+
+**Parameters:**
+- `path` (string, required) - Path to the file to write
+- `content` (string, required) - Content to write to the file
 
 **Request:**
 ```json
@@ -344,7 +351,62 @@ FileJack uses standard JSON-RPC 2.0 error codes:
 | -32700 | Parse error | Invalid JSON received |
 | -32600 | Invalid request | JSON-RPC request is invalid |
 | -32601 | Method not found | Requested method doesn't exist |
+| -32602 | Invalid parameters | Missing or invalid tool parameters |
 | -32000 | Server error | File operation failed (see error message) |
+
+### Error Messages
+
+FileJack provides detailed error messages for debugging:
+
+- **Missing parameters**: Clearly states which parameter is missing and what format is expected
+  - Example: `"Invalid parameters for read_file: missing field 'path'. Expected: {\"path\": \"string\"}"`
+  
+- **Permission denied**: Indicates which access control rule was violated
+  - Example: `"Path /etc/passwd is not in any allowed directory"`
+  
+- **File not found**: Shows the attempted path
+  - Example: `"File not found: /tmp/nonexistent.txt"`
+
+All errors are logged to stderr for debugging MCP integration issues.
+
+## VS Code Integration
+
+FileJack can be used as an MCP server in VS Code. Create a `.vscode/mcp.json` file in your workspace:
+
+```json
+{
+  "servers": {
+    "filejack": {
+      "command": "/path/to/filejack",
+      "args": [],
+      "env": {
+        "FILEJACK_CONFIG": "/path/to/filejack.json"
+      }
+    }
+  }
+}
+```
+
+Or use environment variables for simple configuration:
+
+```json
+{
+  "servers": {
+    "filejack": {
+      "command": "/path/to/filejack",
+      "args": [],
+      "env": {
+        "FILEJACK_BASE_PATH": "/workspace",
+        "FILEJACK_READ_ONLY": "false"
+      }
+    }
+  }
+}
+```
+
+After configuration, restart VS Code. FileJack tools will be available to AI assistants in your workspace.
+
+See [ACCESS_CONTROL.md](ACCESS_CONTROL.md) for advanced configuration options.
 
 ## Security
 

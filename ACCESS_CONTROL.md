@@ -245,8 +245,92 @@ FileJack will return permission denied errors when:
 - Accessing hidden files when not allowed
 - Following symlinks when not permitted
 - Writing files in read-only mode
+- Missing required parameters (e.g., `path` field in read_file)
 
-These errors are returned as JSON-RPC error responses with appropriate error codes and messages.
+These errors are returned as JSON-RPC error responses with detailed messages:
+
+### Example Error Messages
+
+**Missing Parameter:**
+```json
+{
+  "jsonrpc": "2.0",
+  "error": {
+    "code": -32000,
+    "message": "Invalid parameters for read_file: missing field 'path'. Expected: {\"path\": \"string\"}"
+  },
+  "id": 1
+}
+```
+
+**Permission Denied:**
+```json
+{
+  "jsonrpc": "2.0",
+  "error": {
+    "code": -32000,
+    "message": "Path /etc/passwd is not in any allowed directory"
+  },
+  "id": 2
+}
+```
+
+**File Extension Not Allowed:**
+```json
+{
+  "jsonrpc": "2.0",
+  "error": {
+    "code": -32000,
+    "message": "File extension .exe is not allowed"
+  },
+  "id": 3
+}
+```
+
+All errors are also logged to stderr for debugging purposes.
+
+## Troubleshooting
+
+### MCP Tool Integration Issues
+
+If you're experiencing issues with MCP tools (e.g., in VS Code):
+
+1. **Check the server logs**: FileJack logs all requests to stderr
+   - Look for lines like: `Tool 'read_file' called with arguments: {...}`
+   - Check if arguments are empty: `"arguments": {}`
+
+2. **Verify parameters are being sent**: The error message will show what was received
+   - Example: `"Failed to parse read_file params from: {}"`
+
+3. **Common issues**:
+   - **Empty arguments**: MCP client may not be passing parameters correctly
+     - Error: `"missing field 'path'"`
+     - Solution: Check MCP client configuration or update to latest version
+   
+   - **Wrong parameter names**: Check the tool schema
+     - read_file expects: `{"path": "string"}`
+     - write_file expects: `{"path": "string", "content": "string"}`
+   
+   - **Path not allowed**: File is outside configured allowed_paths
+     - Error: `"Path ... is not in any allowed directory"`
+     - Solution: Add the directory to allowed_paths in config
+
+4. **Enable debug logging**: Run FileJack with stderr visible
+   ```bash
+   FILEJACK_CONFIG=config.json ./filejack 2>&1 | tee filejack.log
+   ```
+
+### Configuration Validation
+
+Test your configuration before deploying:
+
+```bash
+# Quick test with echo
+echo '{"jsonrpc":"2.0","method":"tools/list","id":1}' | \
+  FILEJACK_CONFIG=filejack.json ./filejack
+
+# Should return list of available tools
+```
 
 ## Testing Access Control
 

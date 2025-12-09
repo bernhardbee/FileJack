@@ -27,8 +27,11 @@ This document outlines the comprehensive security measures implemented in FileJa
 - **Validation on Load**: Configuration is validated when loaded from file
 
 ### 4. Error Information Disclosure
-- **Sanitized Error Messages**: Error messages provide useful information without exposing sensitive system details
-- **Specific Error Types**: Different error types (FileNotFound, PermissionDenied, etc.) allow proper handling without information leakage
+- **Helpful Error Messages**: Error messages are detailed enough for debugging while avoiding sensitive data exposure
+- **Parameter Validation Errors**: Clear messages indicate which parameters are missing or invalid with expected format
+  - Example: `"Invalid parameters for read_file: missing field 'path'. Expected: {\"path\": \"string\"}"`
+- **Access Control Errors**: Specific messages about which policy rule was violated without exposing full system paths
+- **Debugging Support**: All errors are logged to stderr for troubleshooting MCP integration issues
 - **No Stack Traces in Production**: Error responses don't include internal stack traces
 
 ### 5. Input Validation
