@@ -1,0 +1,25 @@
+[package]
+name = "filejack"
+version = "0.1.0"
+edition = "2021"
+authors = ["FileJack Contributors"]
+description = "MCP Server for Reading and Writing Files"
+license = "MIT"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.35", features = ["full"] }
+anyhow = "1.0"
+thiserror = "1.0"
+
+[dev-dependencies]
+tempfile = "3.8"
+
+[[bin]]
+name = "filejack"
+path = "src/main.rs"
+
+[lib]
+name = "filejack"
+path = "src/lib.rs"
