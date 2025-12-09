@@ -61,10 +61,18 @@ impl McpServer {
 
     /// Handle a tool call
     pub fn handle_tool_call(&self, name: &str, arguments: Value) -> Result<Value> {
+        // Log the arguments received for debugging
+        eprintln!("Tool '{}' called with arguments: {}", name, arguments);
+        
         match name {
             "read_file" => {
-                let params: ReadFileParams = serde_json::from_value(arguments)
-                    .map_err(|e| FileJackError::InvalidParameters(e.to_string()))?;
+                let params: ReadFileParams = serde_json::from_value(arguments.clone())
+                    .map_err(|e| {
+                        eprintln!("Failed to parse read_file params from: {}", arguments);
+                        FileJackError::InvalidParameters(
+                            format!("Invalid parameters for read_file: {}. Expected: {{\"path\": \"string\"}}", e)
+                        )
+                    })?;
                 
                 let content = self.reader.read_to_string(&params.path)?;
                 Ok(json!({
@@ -73,8 +81,13 @@ impl McpServer {
                 }))
             }
             "write_file" => {
-                let params: WriteFileParams = serde_json::from_value(arguments)
-                    .map_err(|e| FileJackError::InvalidParameters(e.to_string()))?;
+                let params: WriteFileParams = serde_json::from_value(arguments.clone())
+                    .map_err(|e| {
+                        eprintln!("Failed to parse write_file params from: {}", arguments);
+                        FileJackError::InvalidParameters(
+                            format!("Invalid parameters for write_file: {}. Expected: {{\"path\": \"string\", \"content\": \"string\"}}", e)
+                        )
+                    })?;
                 
                 self.writer.write_string(&params.path, &params.content)?;
                 Ok(json!({
@@ -98,6 +111,8 @@ impl McpServer {
             "tools/call" => {
                 let params = request.params.unwrap_or(json!({}));
                 
+                eprintln!("tools/call received params: {}", params);
+                
                 let tool_name = params.get("name")
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
@@ -105,14 +120,19 @@ impl McpServer {
                 let arguments = params.get("arguments")
                     .cloned()
                     .unwrap_or(json!({}));
+                
+                eprintln!("Extracted tool_name: '{}', arguments: {}", tool_name, arguments);
 
                 match self.handle_tool_call(tool_name, arguments) {
                     Ok(result) => JsonRpcResponse::success(request.id, result),
-                    Err(e) => JsonRpcResponse::error(
-                        request.id,
-                        -32000,
-                        e.to_string(),
-                    ),
+                    Err(e) => {
+                        eprintln!("Tool call error: {}", e);
+                        JsonRpcResponse::error(
+                            request.id,
+                            -32000,
+                            e.to_string(),
+                        )
+                    }
                 }
             }
             "initialize" => {
@@ -402,5 +422,111 @@ mod tests {
             assert!(!tool.description.is_empty());
             assert!(tool.input_schema.is_object());
         }
+    }
+
+    #[test]
+    fn test_handle_tool_call_with_empty_arguments() {
+        let policy = AccessPolicy::permissive();
+        let server = McpServer::new(policy);
+        
+        // This should fail with a clear error message about missing path
+        let result = server.handle_tool_call("read_file", json!({}));
+        
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        
+        match error {
+            FileJackError::InvalidParameters(msg) => {
+                assert!(msg.contains("path"), "Error message should mention 'path': {}", msg);
+                assert!(msg.contains("Invalid parameters"), "Error message should be helpful: {}", msg);
+            }
+            _ => panic!("Expected InvalidParameters error, got: {:?}", error),
+        }
+    }
+
+    #[test]
+    fn test_handle_tool_call_with_missing_path() {
+        let policy = AccessPolicy::permissive();
+        let server = McpServer::new(policy);
+        
+        // Missing 'path' field
+        let result = server.handle_tool_call("read_file", json!({"wrong_field": "value"}));
+        
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            FileJackError::InvalidParameters(msg) => {
+                assert!(msg.contains("path"));
+            }
+            _ => panic!("Expected InvalidParameters error"),
+        }
+    }
+
+    #[test]
+    fn test_handle_tool_call_write_file_missing_content() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test.txt");
+        
+        let policy = AccessPolicy::restricted(temp_dir.path().to_path_buf());
+        let server = McpServer::new(policy);
+        
+        // Missing 'content' field
+        let result = server.handle_tool_call(
+            "write_file",
+            json!({"path": file_path.to_str().unwrap()})
+        );
+        
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            FileJackError::InvalidParameters(msg) => {
+                assert!(msg.contains("content") || msg.contains("missing field"));
+            }
+            _ => panic!("Expected InvalidParameters error"),
+        }
+    }
+
+    #[test]
+    fn test_handle_request_tools_call_with_empty_arguments() {
+        let policy = AccessPolicy::permissive();
+        let server = McpServer::new(policy);
+        
+        // Simulate the exact request that VS Code MCP extension was sending
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            method: "tools/call".to_string(),
+            params: Some(json!({
+                "name": "read_file",
+                "arguments": {}
+            })),
+            id: Some(json!(1)),
+        };
+
+        let response = server.handle_request(request);
+        
+        // Should return an error, not success
+        assert!(response.error.is_some());
+        assert!(response.result.is_none());
+        
+        let error = response.error.unwrap();
+        assert_eq!(error.code, -32000);
+        assert!(error.message.contains("path"), "Error message should mention missing 'path': {}", error.message);
+    }
+
+    #[test]
+    fn test_process_request_with_empty_arguments_string() {
+        let policy = AccessPolicy::permissive();
+        let server = McpServer::new(policy);
+        
+        // The exact JSON that was failing
+        let request_str = r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"read_file","arguments":{}}}"#;
+        
+        let response_str = server.process_request(request_str);
+        let response: JsonRpcResponse = serde_json::from_str(&response_str).unwrap();
+        
+        // Should have an error about missing path
+        assert!(response.error.is_some());
+        assert!(response.result.is_none());
+        
+        let error = response.error.unwrap();
+        assert!(error.message.contains("path"), "Error should mention 'path': {}", error.message);
     }
 }
