@@ -1,0 +1,33 @@
+{
+  "access_policy": {
+    "allowed_paths": [
+      "/home/user/documents",
+      "/home/user/projects"
+    ],
+    "denied_paths": [
+      "/home/user/documents/private"
+    ],
+    "allowed_extensions": [
+      "txt",
+      "md",
+      "json",
+      "xml",
+      "csv",
+      "log"
+    ],
+    "denied_extensions": [
+      "exe",
+      "sh",
+      "bat",
+      "cmd"
+    ],
+    "max_file_size": 10485760,
+    "allow_symlinks": false,
+    "allow_hidden_files": false,
+    "read_only": false
+  },
+  "server": {
+    "name": "FileJack",
+    "version": "0.1.0"
+  }
+}

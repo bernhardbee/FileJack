@@ -1,4 +1,4 @@
-use filejack::McpServer;
+use filejack::{AccessPolicy, McpServer};
 use std::fs;
 use tempfile::TempDir;
 
@@ -10,8 +10,9 @@ fn main() {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     println!("Working directory: {}\n", temp_dir.path().display());
 
-    // Create an MCP server with the temp directory as base path
-    let server = McpServer::new(Some(temp_dir.path().to_path_buf()));
+    // Create an MCP server with restricted access to temp directory
+    let policy = AccessPolicy::restricted(temp_dir.path().to_path_buf());
+    let server = McpServer::new(policy);
 
     // Example 1: Write a simple file
     println!("1. Writing a simple text file:");

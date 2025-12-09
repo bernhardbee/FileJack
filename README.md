@@ -10,11 +10,17 @@ FileJack is an MCP server that provides secure file I/O capabilities through a J
 
 - ✅ **MCP Protocol Compliant**: Implements the Model Context Protocol specification
 - ✅ **JSON-RPC 2.0**: Standard JSON-RPC interface for communication
-- ✅ **Secure Operations**: Optional base path restriction to limit file access
+- ✅ **Advanced Access Control**: Fine-grained filesystem access control with configurable policies
+- ✅ **Secure Operations**: Path-based restrictions, extension filtering, and file size limits
+- ✅ **Configuration File Support**: JSON-based configuration for access policies
 - ✅ **Comprehensive Testing**: 40+ unit tests and 8 integration tests
 - ✅ **Error Handling**: Detailed error reporting with proper error codes
 - ✅ **Auto-create Directories**: Automatically creates parent directories when writing files
 - ✅ **UTF-8 Support**: Full Unicode support including emojis
+- ✅ **Read-Only Mode**: Support for read-only filesystem access
+- ✅ **Extension Whitelisting/Blacklisting**: Control which file types can be accessed
+- ✅ **Symlink Control**: Configure whether symbolic links can be followed
+- ✅ **Hidden File Control**: Configure access to hidden files
 
 ## Installation
 
@@ -43,13 +49,56 @@ Start the server and it will listen for JSON-RPC requests on stdin:
 ./target/release/filejack
 ```
 
-#### With Base Path Restriction
+#### With Configuration File
 
-Set the `FILEJACK_BASE_PATH` environment variable to restrict file operations to a specific directory:
+Create a `filejack.json` configuration file (see [ACCESS_CONTROL.md](ACCESS_CONTROL.md) for details):
+
+```json
+{
+  "access_policy": {
+    "allowed_paths": ["/home/user/workspace"],
+    "denied_paths": [],
+    "allowed_extensions": ["txt", "md", "json"],
+    "denied_extensions": ["exe", "sh"],
+    "max_file_size": 10485760,
+    "allow_symlinks": false,
+    "allow_hidden_files": false,
+    "read_only": false
+  }
+}
+```
+
+Then run:
 
 ```bash
-FILEJACK_BASE_PATH=/path/to/allowed/directory ./target/release/filejack
+./target/release/filejack
+# Or specify a custom config path
+FILEJACK_CONFIG=/path/to/config.json ./target/release/filejack
 ```
+
+#### With Environment Variables
+
+Set environment variables for basic configuration:
+
+```bash
+# Restrict to specific directory
+FILEJACK_BASE_PATH=/path/to/allowed/directory ./target/release/filejack
+
+# Enable read-only mode
+FILEJACK_BASE_PATH=/path/to/directory FILEJACK_READ_ONLY=true ./target/release/filejack
+```
+
+### Access Control
+
+FileJack includes comprehensive access control to prevent misuse. See [ACCESS_CONTROL.md](ACCESS_CONTROL.md) for detailed documentation on:
+
+- Path-based access control (whitelist/blacklist)
+- File extension filtering
+- File size limits
+- Symbolic link control
+- Hidden file access control
+- Read-only mode
+- Configuration examples and best practices
 
 ### Available Tools
 
@@ -168,24 +217,30 @@ List all available tools.
 {
   "jsonrpc": "2.0",
   "result": {
-    "tools": [
-      {
-        "name": "read_file",
-        "description": "Read contents from a file",
-        "input_schema": {
-          "type": "object",
-          "properties": {
-            "path": {
-              "type": "string",
-              "description": "Path to the file to read"
-            }
-          },
-          "required": ["path"]
-        }
-      },
-      {
-        "name": "write_file",
-        "description": "Write contents to a file",
+```
+FileJack/
+├── src/
+│   ├── lib.rs              # Library exports
+│   ├── main.rs             # Binary entry point
+│   ├── error.rs            # Error types and handling
+│   ├── protocol.rs         # JSON-RPC and MCP protocol structures
+│   ├── file_ops.rs         # File reader and writer implementations
+│   ├── mcp.rs              # MCP server implementation
+│   ├── access_control.rs   # Access control policies
+│   └── config.rs           # Configuration file handling
+├── tests/
+│   └── integration_tests.rs  # Integration tests
+├── ACCESS_CONTROL.md       # Access control documentation
+├── filejack.example.json   # Example configuration file
+### Core Components
+
+1. **FileReader**: Handles reading operations with policy-based access control
+2. **FileWriter**: Handles writing operations with policy-based access control
+3. **AccessPolicy**: Configurable access control policies for filesystem operations
+4. **Config**: Configuration file loading and management
+5. **McpServer**: Orchestrates MCP protocol handling and tool dispatch
+6. **Protocol Structures**: JSON-RPC and MCP type definitions
+7. **Error System**: Comprehensive error types with proper conversions
         "input_schema": {
           "type": "object",
           "properties": {
@@ -224,12 +279,30 @@ FileJack/
 │   └── integration_tests.rs  # Integration tests
 ├── Cargo.toml           # Project configuration
 └── README.md            # This file
-```
+## Security
 
-### Core Components
+FileJack implements multiple layers of security to prevent filesystem misuse:
 
-1. **FileReader**: Handles reading operations with path validation
-2. **FileWriter**: Handles writing operations with auto-directory creation
+### Access Control
+- **Path Whitelisting**: Explicitly define allowed directories
+- **Path Blacklisting**: Deny access to sensitive paths
+- **Extension Filtering**: Control which file types can be accessed
+- **File Size Limits**: Prevent resource exhaustion
+- **Symlink Protection**: Prevent symlink-based attacks
+- **Hidden File Control**: Control access to hidden files
+- **Read-Only Mode**: Prevent any write operations
+
+### Path Validation
+- Canonical path resolution to prevent traversal attacks
+- Strict boundary checking for allowed directories
+- Denied paths take precedence over allowed paths
+
+### Configuration Security
+- All security policies defined in configuration file
+- Environment variable fallback for basic restrictions
+- Secure defaults (restrictive by default)
+
+See [ACCESS_CONTROL.md](ACCESS_CONTROL.md) for comprehensive security documentation and best practices.tion
 3. **McpServer**: Orchestrates MCP protocol handling and tool dispatch
 4. **Protocol Structures**: JSON-RPC and MCP type definitions
 5. **Error System**: Comprehensive error types with proper conversions

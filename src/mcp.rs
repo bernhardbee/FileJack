@@ -1,10 +1,10 @@
+use crate::access_control::AccessPolicy;
 use crate::error::{FileJackError, Result};
 use crate::file_ops::{FileReader, FileWriter};
 use crate::protocol::{
     JsonRpcRequest, JsonRpcResponse, McpTool, ReadFileParams, WriteFileParams,
 };
 use serde_json::{json, Value};
-use std::path::PathBuf;
 
 /// MCP Server for file operations
 pub struct McpServer {
@@ -13,11 +13,11 @@ pub struct McpServer {
 }
 
 impl McpServer {
-    /// Create a new MCP Server with optional base path restriction
-    pub fn new(base_path: Option<PathBuf>) -> Self {
+    /// Create a new MCP Server with an access policy
+    pub fn new(policy: AccessPolicy) -> Self {
         Self {
-            reader: FileReader::new(base_path.clone()),
-            writer: FileWriter::new(base_path, true),
+            reader: FileReader::new(policy.clone()),
+            writer: FileWriter::new(policy, true),
         }
     }
 
@@ -165,20 +165,23 @@ mod tests {
 
     #[test]
     fn test_mcp_server_new() {
-        let server = McpServer::new(None);
+        let policy = AccessPolicy::permissive();
+        let server = McpServer::new(policy);
         assert!(server.list_tools().len() > 0);
     }
 
     #[test]
     fn test_mcp_server_with_base_path() {
         let temp_dir = TempDir::new().unwrap();
-        let server = McpServer::new(Some(temp_dir.path().to_path_buf()));
+        let policy = AccessPolicy::restricted(temp_dir.path().to_path_buf());
+        let server = McpServer::new(policy);
         assert!(server.list_tools().len() > 0);
     }
 
     #[test]
     fn test_list_tools() {
-        let server = McpServer::new(None);
+        let policy = AccessPolicy::permissive();
+        let server = McpServer::new(policy);
         let tools = server.list_tools();
         
         assert_eq!(tools.len(), 2);
@@ -192,7 +195,8 @@ mod tests {
         let file_path = temp_dir.path().join("test.txt");
         fs::write(&file_path, "Hello, MCP!").unwrap();
 
-        let server = McpServer::new(Some(temp_dir.path().to_path_buf()));
+        let policy = AccessPolicy::restricted(temp_dir.path().to_path_buf());
+        let server = McpServer::new(policy);
         let result = server.handle_tool_call(
             "read_file",
             json!({"path": file_path.to_str().unwrap()})
@@ -206,7 +210,8 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("output.txt");
 
-        let server = McpServer::new(Some(temp_dir.path().to_path_buf()));
+        let policy = AccessPolicy::restricted(temp_dir.path().to_path_buf());
+        let server = McpServer::new(policy);
         let result = server.handle_tool_call(
             "write_file",
             json!({
@@ -224,7 +229,8 @@ mod tests {
 
     #[test]
     fn test_handle_tool_call_invalid_tool() {
-        let server = McpServer::new(None);
+        let policy = AccessPolicy::permissive();
+        let server = McpServer::new(policy);
         let result = server.handle_tool_call("invalid_tool", json!({}));
         
         assert!(result.is_err());
@@ -233,7 +239,8 @@ mod tests {
 
     #[test]
     fn test_handle_request_tools_list() {
-        let server = McpServer::new(None);
+        let policy = AccessPolicy::permissive();
+        let server = McpServer::new(policy);
         let request = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             method: "tools/list".to_string(),
@@ -253,7 +260,8 @@ mod tests {
         let file_path = temp_dir.path().join("test.txt");
         fs::write(&file_path, "Test content").unwrap();
 
-        let server = McpServer::new(Some(temp_dir.path().to_path_buf()));
+        let policy = AccessPolicy::restricted(temp_dir.path().to_path_buf());
+        let server = McpServer::new(policy);
         let request = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             method: "tools/call".to_string(),
@@ -271,7 +279,8 @@ mod tests {
 
     #[test]
     fn test_handle_request_initialize() {
-        let server = McpServer::new(None);
+        let policy = AccessPolicy::permissive();
+        let server = McpServer::new(policy);
         let request = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             method: "initialize".to_string(),
@@ -289,7 +298,8 @@ mod tests {
 
     #[test]
     fn test_handle_request_unknown_method() {
-        let server = McpServer::new(None);
+        let policy = AccessPolicy::permissive();
+        let server = McpServer::new(policy);
         let request = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             method: "unknown/method".to_string(),
@@ -307,7 +317,8 @@ mod tests {
 
     #[test]
     fn test_process_request_valid_json() {
-        let server = McpServer::new(None);
+        let policy = AccessPolicy::permissive();
+        let server = McpServer::new(policy);
         let request_str = r#"{"jsonrpc":"2.0","method":"tools/list","id":1}"#;
         
         let response_str = server.process_request(request_str);
@@ -319,7 +330,8 @@ mod tests {
 
     #[test]
     fn test_process_request_invalid_json() {
-        let server = McpServer::new(None);
+        let policy = AccessPolicy::permissive();
+        let server = McpServer::new(policy);
         let request_str = r#"{"invalid json"#;
         
         let response_str = server.process_request(request_str);
@@ -334,7 +346,8 @@ mod tests {
     fn test_process_request_read_write_workflow() {
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("workflow.txt");
-        let server = McpServer::new(Some(temp_dir.path().to_path_buf()));
+        let policy = AccessPolicy::restricted(temp_dir.path().to_path_buf());
+        let server = McpServer::new(policy);
 
         // Write file
         let write_request = format!(
@@ -364,7 +377,8 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let nested_path = temp_dir.path().join("subdir").join("nested.txt");
 
-        let server = McpServer::new(Some(temp_dir.path().to_path_buf()));
+        let policy = AccessPolicy::restricted(temp_dir.path().to_path_buf());
+        let server = McpServer::new(policy);
         let result = server.handle_tool_call(
             "write_file",
             json!({
@@ -379,7 +393,8 @@ mod tests {
 
     #[test]
     fn test_tools_have_proper_schema() {
-        let server = McpServer::new(None);
+        let policy = AccessPolicy::permissive();
+        let server = McpServer::new(policy);
         let tools = server.list_tools();
 
         for tool in tools {

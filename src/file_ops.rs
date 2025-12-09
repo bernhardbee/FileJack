@@ -1,3 +1,4 @@
+use crate::access_control::AccessPolicy;
 use crate::error::{FileJackError, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -5,40 +6,28 @@ use std::path::{Path, PathBuf};
 /// FileReader handles reading operations from the filesystem
 #[derive(Debug, Clone)]
 pub struct FileReader {
-    base_path: Option<PathBuf>,
+    policy: AccessPolicy,
 }
 
 impl FileReader {
-    /// Create a new FileReader with optional base path restriction
-    pub fn new(base_path: Option<PathBuf>) -> Self {
-        Self { base_path }
+    /// Create a new FileReader with an access policy
+    pub fn new(policy: AccessPolicy) -> Self {
+        Self { policy }
     }
 
     /// Validate that the path is within allowed bounds
     fn validate_path(&self, path: &Path) -> Result<PathBuf> {
-        let canonical = path.canonicalize().map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                FileJackError::FileNotFound(path.display().to_string())
-            } else {
-                FileJackError::Io(e)
-            }
-        })?;
-
-        if let Some(ref base) = self.base_path {
-            let base_canonical = base.canonicalize()?;
-            if !canonical.starts_with(&base_canonical) {
-                return Err(FileJackError::PermissionDenied(
-                    format!("Path {} is outside allowed directory", path.display())
-                ));
-            }
-        }
-
-        Ok(canonical)
+        self.policy.validate_read(path)
     }
 
     /// Read file contents as a string
     pub fn read_to_string<P: AsRef<Path>>(&self, path: P) -> Result<String> {
         let validated_path = self.validate_path(path.as_ref())?;
+        
+        // Check file size
+        if let Ok(metadata) = fs::metadata(&validated_path) {
+            self.policy.validate_file_size(metadata.len())?;
+        }
         
         fs::read_to_string(&validated_path).map_err(|e| {
             match e.kind() {
@@ -56,6 +45,11 @@ impl FileReader {
     /// Read file contents as bytes
     pub fn read_to_bytes<P: AsRef<Path>>(&self, path: P) -> Result<Vec<u8>> {
         let validated_path = self.validate_path(path.as_ref())?;
+        
+        // Check file size
+        if let Ok(metadata) = fs::metadata(&validated_path) {
+            self.policy.validate_file_size(metadata.len())?;
+        }
         
         fs::read(&validated_path).map_err(|e| {
             match e.kind() {
@@ -79,53 +73,30 @@ impl FileReader {
 /// FileWriter handles writing operations to the filesystem
 #[derive(Debug, Clone)]
 pub struct FileWriter {
-    base_path: Option<PathBuf>,
+    policy: AccessPolicy,
     create_dirs: bool,
 }
 
 impl FileWriter {
-    /// Create a new FileWriter with optional base path restriction
-    pub fn new(base_path: Option<PathBuf>, create_dirs: bool) -> Self {
+    /// Create a new FileWriter with an access policy
+    pub fn new(policy: AccessPolicy, create_dirs: bool) -> Self {
         Self {
-            base_path,
+            policy,
             create_dirs,
         }
     }
 
     /// Validate that the path is within allowed bounds
     fn validate_path(&self, path: &Path) -> Result<PathBuf> {
-        // For writing, we need to handle non-existent files
-        let parent = path.parent().ok_or_else(|| {
-            FileJackError::InvalidPath("Path has no parent directory".to_string())
-        })?;
-
-        if let Some(ref base) = self.base_path {
-            let base_canonical = base.canonicalize()?;
-            
-            // If parent exists, canonicalize it
-            if parent.exists() {
-                let parent_canonical = parent.canonicalize()?;
-                if !parent_canonical.starts_with(&base_canonical) {
-                    return Err(FileJackError::PermissionDenied(
-                        format!("Path {} is outside allowed directory", path.display())
-                    ));
-                }
-            } else {
-                // For non-existent parents, check the base path itself
-                if !parent.starts_with(base) {
-                    return Err(FileJackError::PermissionDenied(
-                        format!("Path {} is outside allowed directory", path.display())
-                    ));
-                }
-            }
-        }
-
-        Ok(path.to_path_buf())
+        self.policy.validate_write(path)
     }
 
     /// Write string content to a file
     pub fn write_string<P: AsRef<Path>>(&self, path: P, content: &str) -> Result<()> {
         let validated_path = self.validate_path(path.as_ref())?;
+
+        // Check file size
+        self.policy.validate_file_size(content.len() as u64)?;
 
         if self.create_dirs {
             if let Some(parent) = validated_path.parent() {
@@ -151,6 +122,9 @@ impl FileWriter {
     /// Write bytes to a file
     pub fn write_bytes<P: AsRef<Path>>(&self, path: P, content: &[u8]) -> Result<()> {
         let validated_path = self.validate_path(path.as_ref())?;
+
+        // Check file size
+        self.policy.validate_file_size(content.len() as u64)?;
 
         if self.create_dirs {
             if let Some(parent) = validated_path.parent() {
@@ -191,16 +165,15 @@ impl FileWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::access_control::AccessPolicy;
     use tempfile::TempDir;
 
     #[test]
     fn test_file_reader_new() {
-        let reader = FileReader::new(None);
-        assert!(reader.base_path.is_none());
-
         let temp_dir = TempDir::new().unwrap();
-        let reader = FileReader::new(Some(temp_dir.path().to_path_buf()));
-        assert!(reader.base_path.is_some());
+        let policy = AccessPolicy::restricted(temp_dir.path().to_path_buf());
+        let reader = FileReader::new(policy);
+        assert_eq!(reader.policy.allowed_paths.len(), 1);
     }
 
     #[test]
@@ -209,7 +182,8 @@ mod tests {
         let file_path = temp_dir.path().join("test.txt");
         fs::write(&file_path, "Hello, World!").unwrap();
 
-        let reader = FileReader::new(Some(temp_dir.path().to_path_buf()));
+        let policy = AccessPolicy::restricted(temp_dir.path().to_path_buf());
+        let reader = FileReader::new(policy);
         let content = reader.read_to_string(&file_path).unwrap();
         assert_eq!(content, "Hello, World!");
     }
@@ -221,7 +195,8 @@ mod tests {
         let data = vec![0u8, 1, 2, 3, 4];
         fs::write(&file_path, &data).unwrap();
 
-        let reader = FileReader::new(Some(temp_dir.path().to_path_buf()));
+        let policy = AccessPolicy::restricted(temp_dir.path().to_path_buf());
+        let reader = FileReader::new(policy);
         let content = reader.read_to_bytes(&file_path).unwrap();
         assert_eq!(content, data);
     }
@@ -231,7 +206,8 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("nonexistent.txt");
 
-        let reader = FileReader::new(Some(temp_dir.path().to_path_buf()));
+        let policy = AccessPolicy::restricted(temp_dir.path().to_path_buf());
+        let reader = FileReader::new(policy);
         let result = reader.read_to_string(&file_path);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), FileJackError::FileNotFound(_)));
@@ -243,20 +219,17 @@ mod tests {
         let file_path = temp_dir.path().join("test.txt");
         fs::write(&file_path, "test").unwrap();
 
-        let reader = FileReader::new(None);
+        let policy = AccessPolicy::permissive();
+        let reader = FileReader::new(policy);
         assert!(reader.exists(&file_path));
         assert!(!reader.exists(temp_dir.path().join("nonexistent.txt")));
     }
 
     #[test]
     fn test_file_writer_new() {
-        let writer = FileWriter::new(None, false);
-        assert!(writer.base_path.is_none());
-        assert!(!writer.create_dirs);
-
         let temp_dir = TempDir::new().unwrap();
-        let writer = FileWriter::new(Some(temp_dir.path().to_path_buf()), true);
-        assert!(writer.base_path.is_some());
+        let policy = AccessPolicy::restricted(temp_dir.path().to_path_buf());
+        let writer = FileWriter::new(policy, true);
         assert!(writer.create_dirs);
     }
 
@@ -265,7 +238,8 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("output.txt");
 
-        let writer = FileWriter::new(Some(temp_dir.path().to_path_buf()), false);
+        let policy = AccessPolicy::restricted(temp_dir.path().to_path_buf());
+        let writer = FileWriter::new(policy, false);
         writer.write_string(&file_path, "Test content").unwrap();
 
         let content = fs::read_to_string(&file_path).unwrap();
@@ -278,7 +252,8 @@ mod tests {
         let file_path = temp_dir.path().join("output.bin");
         let data = vec![10u8, 20, 30, 40];
 
-        let writer = FileWriter::new(Some(temp_dir.path().to_path_buf()), false);
+        let policy = AccessPolicy::restricted(temp_dir.path().to_path_buf());
+        let writer = FileWriter::new(policy, false);
         writer.write_bytes(&file_path, &data).unwrap();
 
         let content = fs::read(&file_path).unwrap();
@@ -290,7 +265,8 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("subdir").join("output.txt");
 
-        let writer = FileWriter::new(Some(temp_dir.path().to_path_buf()), true);
+        let policy = AccessPolicy::restricted(temp_dir.path().to_path_buf());
+        let writer = FileWriter::new(policy, true);
         writer.write_string(&file_path, "Nested content").unwrap();
 
         assert!(file_path.exists());
@@ -303,7 +279,8 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("append.txt");
 
-        let writer = FileWriter::new(Some(temp_dir.path().to_path_buf()), false);
+        let policy = AccessPolicy::restricted(temp_dir.path().to_path_buf());
+        let writer = FileWriter::new(policy, false);
         writer.write_string(&file_path, "Line 1\n").unwrap();
         writer.append_string(&file_path, "Line 2\n").unwrap();
         writer.append_string(&file_path, "Line 3\n").unwrap();
@@ -317,7 +294,8 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("nonexistent").join("output.txt");
 
-        let writer = FileWriter::new(Some(temp_dir.path().to_path_buf()), false);
+        let policy = AccessPolicy::restricted(temp_dir.path().to_path_buf());
+        let writer = FileWriter::new(policy, false);
         let result = writer.write_string(&file_path, "Should fail");
         assert!(result.is_err());
     }
@@ -328,9 +306,10 @@ mod tests {
         let allowed_file = temp_dir.path().join("allowed.txt");
         fs::write(&allowed_file, "allowed content").unwrap();
 
-        let reader = FileReader::new(Some(temp_dir.path().to_path_buf()));
+        let policy = AccessPolicy::restricted(temp_dir.path().to_path_buf());
+        let reader = FileReader::new(policy);
         
-        // Should succeed - file is within base path
+        // Should succeed - file is within allowed path
         assert!(reader.read_to_string(&allowed_file).is_ok());
     }
 
@@ -339,7 +318,8 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("overwrite.txt");
 
-        let writer = FileWriter::new(Some(temp_dir.path().to_path_buf()), false);
+        let policy = AccessPolicy::restricted(temp_dir.path().to_path_buf());
+        let writer = FileWriter::new(policy, false);
         writer.write_string(&file_path, "Original").unwrap();
         writer.write_string(&file_path, "Overwritten").unwrap();
 

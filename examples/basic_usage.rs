@@ -1,19 +1,21 @@
-use filejack::McpServer;
+use filejack::{AccessPolicy, McpServer};
 use std::env;
 
 /// Example: Creating an MCP server with custom configuration
 fn main() {
     println!("FileJack Basic Usage Example\n");
 
-    // Example 1: Create server without base path restriction
-    println!("1. Creating server without path restrictions:");
-    let server_unrestricted = McpServer::new(None);
-    println!("   ✓ Server created (unrestricted mode)\n");
+    // Example 1: Create server without restrictions (permissive mode)
+    println!("1. Creating server with permissive policy:");
+    let policy_permissive = AccessPolicy::permissive();
+    let server_unrestricted = McpServer::new(policy_permissive);
+    println!("   ✓ Server created (permissive mode)\n");
 
-    // Example 2: Create server with base path restriction
-    println!("2. Creating server with base path restriction:");
+    // Example 2: Create server with restricted access
+    println!("2. Creating server with restricted access:");
     let temp_dir = env::temp_dir();
-    let _server_restricted = McpServer::new(Some(temp_dir.clone()));
+    let policy_restricted = AccessPolicy::restricted(temp_dir.clone());
+    let _server_restricted = McpServer::new(policy_restricted);
     println!("   ✓ Server created with base path: {}\n", temp_dir.display());
 
     // Example 3: List available tools

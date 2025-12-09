@@ -1,30 +1,48 @@
 # Security Considerations for FileJack
 
 ## Overview
-This document outlines the security measures implemented in FileJack to ensure safe file operations.
+This document outlines the comprehensive security measures implemented in FileJack to ensure safe file operations and prevent misuse.
 
 ## Security Features
 
-### 1. Path Traversal Prevention
+### 1. Access Control System
+- **Path Whitelisting**: Explicitly define allowed directories through configuration
+- **Path Blacklisting**: Deny access to sensitive paths, overriding whitelist
+- **Extension Filtering**: Control which file types can be accessed (whitelist and blacklist)
+- **File Size Limits**: Prevent resource exhaustion attacks by limiting file sizes
+- **Read-Only Mode**: Complete write operation prevention when enabled
+- **Symlink Control**: Configure whether symbolic links can be followed
+- **Hidden File Control**: Restrict access to hidden files (starting with `.`)
+
+### 2. Path Traversal Prevention
 - **Canonical Path Resolution**: All file paths are canonicalized using `Path::canonicalize()` to resolve symlinks and `..` sequences
 - **Base Path Enforcement**: When configured with a base path, all operations are restricted to that directory tree
 - **Validation Before Operations**: All file paths are validated before any read or write operations
+- **Denied Paths Precedence**: Denied paths take precedence over allowed paths to prevent bypass
 
-### 2. Error Information Disclosure
+### 3. Configuration Security
+- **Secure Defaults**: Restrictive defaults (no symlinks, no hidden files, limited file size)
+- **Configuration File Support**: JSON-based configuration for explicit security policies
+- **Environment Variable Fallback**: Support for basic restrictions via environment variables
+- **Validation on Load**: Configuration is validated when loaded from file
+
+### 4. Error Information Disclosure
 - **Sanitized Error Messages**: Error messages provide useful information without exposing sensitive system details
 - **Specific Error Types**: Different error types (FileNotFound, PermissionDenied, etc.) allow proper handling without information leakage
+- **No Stack Traces in Production**: Error responses don't include internal stack traces
 
-### 3. Input Validation
+### 5. Input Validation
 - **JSON-RPC Validation**: All incoming requests are validated against the JSON-RPC 2.0 specification
 - **Parameter Validation**: Tool parameters are validated using serde for type safety
-- **Path Validation**: File paths are validated for existence and permissions before operations
+- **Path Validation**: File paths are validated for existence, permissions, and policy compliance
+- **Extension Validation**: File extensions are checked against allowed/denied lists
 
-### 4. Memory Safety
+### 6. Memory Safety
 - **Rust's Memory Safety**: Leverages Rust's ownership system to prevent buffer overflows and memory corruption
 - **No Unsafe Code**: The entire codebase contains zero `unsafe` blocks
 - **Bounds Checking**: All array and vector accesses are bounds-checked by Rust
 
-### 5. Dependency Security
+### 7. Dependency Security
 - **Minimal Dependencies**: Uses only well-maintained, popular crates:
   - `serde` & `serde_json`: Industry-standard serialization
   - `tokio`: Well-audited async runtime
@@ -35,18 +53,84 @@ This document outlines the security measures implemented in FileJack to ensure s
 
 ### When Deploying FileJack
 
-1. **Always Set Base Path**: Use `FILEJACK_BASE_PATH` environment variable to restrict file access
+1. **Always Use Configuration File**: Define explicit access policies
    ```bash
-   FILEJACK_BASE_PATH=/path/to/safe/directory ./filejack
+   # Create filejack.json with restrictive policy
+   FILEJACK_CONFIG=filejack.json ./filejack
    ```
 
-2. **Run with Least Privilege**: Run the server with minimal file system permissions
+2. **Use Path Whitelisting**: Only allow access to necessary directories
+   ```json
+   {
+     "access_policy": {
+       "allowed_paths": ["/data/workspace"],
+       "denied_paths": [],
+       "allowed_extensions": ["txt", "md", "json"],
+       "denied_extensions": ["exe", "sh", "bat"],
+       "max_file_size": 10485760,
+       "allow_symlinks": false,
+       "allow_hidden_files": false,
+       "read_only": false
+     }
+   }
+   ```
+
+3. **Deny Dangerous Extensions**: Always block executables
+   ```json
+   {
+     "access_policy": {
+       "denied_extensions": ["exe", "dll", "so", "sh", "bat", "cmd", "ps1"]
+     }
+   }
+   ```
+
+4. **Set File Size Limits**: Prevent resource exhaustion
+   ```json
+   {
+     "access_policy": {
+       "max_file_size": 10485760  // 10MB
+     }
+   }
+   ```
+
+5. **Run with Least Privilege**: Run the server with minimal file system permissions
    ```bash
    # Create a dedicated user
    sudo useradd -r -s /bin/false filejack
    
+   # Set up workspace with proper permissions
+   sudo mkdir -p /data/workspace
+   sudo chown filejack:filejack /data/workspace
+   
    # Run as that user
-   sudo -u filejack FILEJACK_BASE_PATH=/data ./filejack
+   sudo -u filejack FILEJACK_CONFIG=/etc/filejack.json ./filejack
+   ```
+
+6. **Use Read-Only Mode**: When write access isn't needed
+   ```json
+   {
+     "access_policy": {
+       "read_only": true
+     }
+   }
+   ```
+
+7. **Disable Symlinks**: Unless explicitly required
+   ```json
+   {
+     "access_policy": {
+       "allow_symlinks": false
+     }
+   }
+   ```
+
+8. **Block Hidden Files**: Prevent access to configuration files
+   ```json
+   {
+     "access_policy": {
+       "allow_hidden_files": false
+     }
+   }
    ```
 
 3. **Network Isolation**: If exposed over network, use secure tunnels (SSH, VPN) or encryption (TLS)

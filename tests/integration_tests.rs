@@ -1,11 +1,11 @@
-use filejack::McpServer;
+use filejack::{AccessPolicy, McpServer};
 use std::fs;
 use tempfile::TempDir;
 
 #[test]
 fn test_complete_mcp_workflow() {
     let temp_dir = TempDir::new().unwrap();
-    let server = McpServer::new(Some(temp_dir.path().to_path_buf()));
+    let server = McpServer::new(AccessPolicy::restricted(temp_dir.path().to_path_buf()));
 
     // Test initialize
     let init_request = r#"{"jsonrpc":"2.0","method":"initialize","id":1}"#;
@@ -43,7 +43,7 @@ fn test_complete_mcp_workflow() {
 #[test]
 fn test_multiple_file_operations() {
     let temp_dir = TempDir::new().unwrap();
-    let server = McpServer::new(Some(temp_dir.path().to_path_buf()));
+    let server = McpServer::new(AccessPolicy::restricted(temp_dir.path().to_path_buf()));
 
     // Create multiple files
     for i in 1..=5 {
@@ -74,7 +74,7 @@ fn test_multiple_file_operations() {
 #[test]
 fn test_error_handling() {
     let temp_dir = TempDir::new().unwrap();
-    let server = McpServer::new(Some(temp_dir.path().to_path_buf()));
+    let server = McpServer::new(AccessPolicy::restricted(temp_dir.path().to_path_buf()));
 
     // Test reading non-existent file
     let nonexistent_path = temp_dir.path().join("nonexistent.txt");
@@ -100,7 +100,7 @@ fn test_error_handling() {
 #[test]
 fn test_nested_directory_creation() {
     let temp_dir = TempDir::new().unwrap();
-    let server = McpServer::new(Some(temp_dir.path().to_path_buf()));
+    let server = McpServer::new(AccessPolicy::restricted(temp_dir.path().to_path_buf()));
 
     let nested_path = temp_dir.path().join("level1").join("level2").join("file.txt");
     let write_request = format!(
@@ -124,7 +124,7 @@ fn test_nested_directory_creation() {
 #[test]
 fn test_large_file_operations() {
     let temp_dir = TempDir::new().unwrap();
-    let server = McpServer::new(Some(temp_dir.path().to_path_buf()));
+    let server = McpServer::new(AccessPolicy::restricted(temp_dir.path().to_path_buf()));
 
     // Create a large content string (1MB)
     let large_content = "x".repeat(1024 * 1024);
@@ -152,7 +152,7 @@ fn test_large_file_operations() {
 #[test]
 fn test_file_overwrite() {
     let temp_dir = TempDir::new().unwrap();
-    let server = McpServer::new(Some(temp_dir.path().to_path_buf()));
+    let server = McpServer::new(AccessPolicy::restricted(temp_dir.path().to_path_buf()));
     let file_path = temp_dir.path().join("overwrite_test.txt");
 
     // Write initial content
@@ -177,7 +177,7 @@ fn test_file_overwrite() {
 #[test]
 fn test_special_characters_in_content() {
     let temp_dir = TempDir::new().unwrap();
-    let server = McpServer::new(Some(temp_dir.path().to_path_buf()));
+    let server = McpServer::new(AccessPolicy::restricted(temp_dir.path().to_path_buf()));
     let file_path = temp_dir.path().join("special_chars.txt");
 
     let special_content = "Line1\nLine2\tTabbed\r\nWindows line\n\"Quoted\" and 'apostrophe' content\n🚀 Emoji support!";
@@ -200,7 +200,7 @@ fn test_special_characters_in_content() {
 #[test]
 fn test_concurrent_operations_simulation() {
     let temp_dir = TempDir::new().unwrap();
-    let server = McpServer::new(Some(temp_dir.path().to_path_buf()));
+    let server = McpServer::new(AccessPolicy::restricted(temp_dir.path().to_path_buf()));
 
     // Simulate multiple concurrent operations by executing them sequentially
     // In a real scenario, this would use async/threading
