@@ -8,7 +8,7 @@ FileJack is an MCP server that provides secure file I/O capabilities through a J
 
 ## Features
 
-- ✅ **MCP Protocol Compliant**: Implements the Model Context Protocol specification
+- ✅ **MCP Protocol Compliant**: Implements the Model Context Protocol specification with content block format
 - ✅ **JSON-RPC 2.0**: Standard JSON-RPC interface for communication
 - ✅ **Advanced Access Control**: Fine-grained filesystem access control with configurable policies
 - ✅ **Secure Operations**: Path-based restrictions, extension filtering, and file size limits
@@ -129,8 +129,12 @@ Read contents from a file.
 {
   "jsonrpc": "2.0",
   "result": {
-    "content": "File contents here...",
-    "path": "/path/to/file.txt"
+    "content": [
+      {
+        "type": "text",
+        "text": "File contents here..."
+      }
+    ]
   },
   "id": 1
 }
@@ -165,9 +169,12 @@ Write contents to a file (creates parent directories if needed).
 {
   "jsonrpc": "2.0",
   "result": {
-    "success": true,
-    "path": "/path/to/file.txt",
-    "bytes_written": 16
+    "content": [
+      {
+        "type": "text",
+        "text": "Successfully wrote 16 bytes to /path/to/file.txt"
+      }
+    ]
   },
   "id": 2
 }

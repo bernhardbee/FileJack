@@ -7,7 +7,7 @@
     "max_file_size": 10485760,
     "allow_symlinks": false,
     "allow_hidden_files": false,
-    "read_only": true
+    "read_only": false
   },
   "server": {
     "name": "FileJack",

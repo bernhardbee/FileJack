@@ -217,7 +217,7 @@ policy.allowed_extensions = vec!["txt".to_string(), "json".to_string()];
 policy.max_file_size = 1024 * 1024; // 1MB
 
 // Create server with policy
-let server = McpServer::with_policy(policy);
+let server = McpServer::new(policy);
 ```
 
 ### Loading Configuration
@@ -227,7 +227,7 @@ use filejack::Config;
 
 // Load from file
 let config = Config::from_file("filejack.json")?;
-let server = McpServer::with_policy(config.access_policy);
+let server = McpServer::new(config.access_policy);
 
 // Create and save configuration
 let config = Config::default_restricted(PathBuf::from("/workspace"));
