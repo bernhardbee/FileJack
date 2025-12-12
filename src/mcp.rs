@@ -169,6 +169,14 @@ impl McpServer {
     pub fn process_request(&self, request_str: &str) -> String {
         match serde_json::from_str::<JsonRpcRequest>(request_str) {
             Ok(request) => {
+                // JSON-RPC 2.0: If id is None, it's a notification and should not be responded to
+                if request.id.is_none() {
+                    // For notifications, we still process them but return empty string
+                    // (or could return empty to indicate no response needed)
+                    self.handle_request(request);
+                    return String::new();
+                }
+                
                 let response = self.handle_request(request);
                 serde_json::to_string(&response).unwrap()
             }
