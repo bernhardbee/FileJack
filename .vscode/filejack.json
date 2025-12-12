@@ -1,0 +1,16 @@
+{
+  "access_policy": {
+    "allowed_paths": ["/tmp/filejack"],
+    "denied_paths": ["/tmp/filejack/Denied"],
+    "allowed_extensions": [],
+    "denied_extensions": [],
+    "max_file_size": 10485760,
+    "allow_symlinks": false,
+    "allow_hidden_files": false,
+    "read_only": true
+  },
+  "server": {
+    "name": "FileJack",
+    "version": "0.1.0"
+  }
+}

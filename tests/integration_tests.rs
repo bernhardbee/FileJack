@@ -26,7 +26,7 @@ fn test_complete_mcp_workflow() {
         file_path.to_str().unwrap()
     );
     let write_response = server.process_request(&write_request);
-    assert!(write_response.contains("\"success\":true"));
+    assert!(write_response.contains("Successfully wrote"));
 
     // Verify file was created
     assert!(file_path.exists());
@@ -55,7 +55,7 @@ fn test_multiple_file_operations() {
             i
         );
         let response = server.process_request(&write_request);
-        assert!(response.contains("\"success\":true"));
+        assert!(response.contains("Successfully wrote"));
     }
 
     // Read all files
@@ -109,7 +109,7 @@ fn test_nested_directory_creation() {
     );
     
     let response = server.process_request(&write_request);
-    assert!(response.contains("\"success\":true"));
+    assert!(response.contains("Successfully wrote"));
     assert!(nested_path.exists());
 
     // Verify we can read the nested file
@@ -137,16 +137,19 @@ fn test_large_file_operations() {
     );
     
     let response = server.process_request(&write_request);
-    assert!(response.contains("\"success\":true"));
-    assert!(response.contains(&format!("\"bytes_written\":{}", large_content.len())));
+    assert!(response.contains("Successfully wrote"));
+    assert!(response.contains(&format!("{} bytes", large_content.len())));
 
-    // Read the large file
+    // Read the large file - don't print response to avoid huge output
     let read_request = format!(
         r#"{{"jsonrpc":"2.0","method":"tools/call","params":{{"name":"read_file","arguments":{{"path":"{}"}}}}, "id":2}}"#,
         file_path.to_str().unwrap()
     );
     let response = server.process_request(&read_request);
-    assert!(response.contains("\"content\":"));
+    // Check structure without printing full content
+    assert!(response.contains(r#""content":"#));
+    assert!(response.contains(r#""type":"text""#));
+    assert!(response.len() > 1024 * 1024); // Response should be large
 }
 
 #[test]
@@ -189,7 +192,7 @@ fn test_special_characters_in_content() {
     );
     
     let response = server.process_request(&write_request);
-    assert!(response.contains("\"success\":true"));
+    assert!(response.contains("Successfully wrote"));
 
     // Read and verify
     let content = fs::read_to_string(&file_path).unwrap();
@@ -218,7 +221,7 @@ fn test_concurrent_operations_simulation() {
             content
         );
         let response = server.process_request(&write_request);
-        assert!(response.contains("\"success\":true"));
+        assert!(response.contains("Successfully wrote"));
     }
 
     // Verify all files exist

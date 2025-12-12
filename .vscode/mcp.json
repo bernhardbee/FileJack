@@ -4,8 +4,7 @@
       "command": "/Users/bb/Develop/FileJack/FileJack/target/release/filejack",
       "args": [],
       "env": {
-        "FILEJACK_BASE_PATH": "/tmp/filejack",
-        "FILEJACK_READ_ONLY": "true"
+        "FILEJACK_CONFIG": "/Users/bb/Develop/FileJack/FileJack/.vscode/filejack.json"
       }
     }
   }

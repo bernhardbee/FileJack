@@ -76,8 +76,12 @@ impl McpServer {
                 
                 let content = self.reader.read_to_string(&params.path)?;
                 Ok(json!({
-                    "content": content,
-                    "path": params.path
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": content
+                        }
+                    ]
                 }))
             }
             "write_file" => {
@@ -91,9 +95,12 @@ impl McpServer {
                 
                 self.writer.write_string(&params.path, &params.content)?;
                 Ok(json!({
-                    "success": true,
-                    "path": params.path,
-                    "bytes_written": params.content.len()
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": format!("Successfully wrote {} bytes to {}", params.content.len(), params.path)
+                        }
+                    ]
                 }))
             }
             _ => Err(FileJackError::ToolNotFound(name.to_string())),
@@ -222,7 +229,8 @@ mod tests {
             json!({"path": file_path.to_str().unwrap()})
         ).unwrap();
 
-        assert_eq!(result["content"], "Hello, MCP!");
+        assert_eq!(result["content"][0]["type"], "text");
+        assert_eq!(result["content"][0]["text"], "Hello, MCP!");
     }
 
     #[test]
@@ -240,8 +248,8 @@ mod tests {
             })
         ).unwrap();
 
-        assert_eq!(result["success"], true);
-        assert_eq!(result["bytes_written"], 14);
+        assert_eq!(result["content"][0]["type"], "text");
+        assert!(result["content"][0]["text"].as_str().unwrap().contains("Successfully wrote"));
 
         let content = fs::read_to_string(&file_path).unwrap();
         assert_eq!(content, "MCP write test");
@@ -294,7 +302,9 @@ mod tests {
 
         let response = server.handle_request(request);
         assert!(response.result.is_some());
-        assert_eq!(response.result.unwrap()["content"], "Test content");
+        let result = response.result.unwrap();
+        assert_eq!(result["content"][0]["type"], "text");
+        assert_eq!(result["content"][0]["text"], "Test content");
     }
 
     #[test]
@@ -389,7 +399,9 @@ mod tests {
         let read_response: JsonRpcResponse = serde_json::from_str(&read_response_str).unwrap();
         
         assert!(read_response.result.is_some());
-        assert_eq!(read_response.result.unwrap()["content"], "Workflow test");
+        let result = read_response.result.unwrap();
+        assert_eq!(result["content"][0]["type"], "text");
+        assert_eq!(result["content"][0]["text"], "Workflow test");
     }
 
     #[test]
@@ -407,7 +419,8 @@ mod tests {
             })
         ).unwrap();
 
-        assert_eq!(result["success"], true);
+        assert_eq!(result["content"][0]["type"], "text");
+        assert!(result["content"][0]["text"].as_str().unwrap().contains("Successfully wrote"));
         assert!(nested_path.exists());
     }
 
