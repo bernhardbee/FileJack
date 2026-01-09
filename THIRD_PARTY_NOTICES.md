@@ -67,6 +67,20 @@ FileJack uses the following open-source libraries and components:
 - **Repository**: https://github.com/katharostech/nonzero_ext
 - **Description**: Extensions for NonZero types
 
+### glob (MIT OR Apache-2.0)
+- **Version**: 0.3
+- **Authors**: The Rust Project Developers
+- **License**: MIT OR Apache-2.0
+- **Repository**: https://github.com/rust-lang/glob
+- **Description**: Support for matching file paths against Unix shell style patterns
+
+### regex (MIT OR Apache-2.0)
+- **Version**: 1.10
+- **Authors**: The Rust Project Developers, Andrew Gallant
+- **License**: MIT OR Apache-2.0
+- **Repository**: https://github.com/rust-lang/regex
+- **Description**: An implementation of regular expressions for Rust
+
 ## Development Dependencies
 
 ### tempfile (MIT OR Apache-2.0)

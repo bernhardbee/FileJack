@@ -1,21 +1,24 @@
 # FileJack - Project Summary
 
 ## Overview
-FileJack is a production-ready Model Context Protocol (MCP) server written in Rust for secure file reading and writing operations.
+FileJack is a production-ready Model Context Protocol (MCP) server written in Rust for secure and comprehensive file operations.
 
-## Implementation Status: ✅ COMPLETE
+## Implementation Status: ✅ COMPLETE v0.2.0
 
 All requirements from the problem statement have been successfully implemented and verified.
+Version 0.2.0 adds 7 new tools for complete file operation coverage.
 
 ## Project Statistics
 
 ### Code Metrics
-- **Total Lines of Code**: 1,464 lines
+- **Version**: 0.2.0
+- **Total Lines of Code**: ~2,200 lines
 - **Source Files**: 6 core modules + 1 binary
 - **Test Files**: 1 integration test file
-- **Example Files**: 2 working examples
-- **Test Count**: 48 total tests (40 unit + 8 integration)
+- **Example Files**: 3 working examples
+- **Test Count**: 107 total tests (69 unit + 21 integration + 17 security)
 - **Test Pass Rate**: 100%
+- **Available Tools**: 14 comprehensive file operation tools
 
 ### File Breakdown
 ```
@@ -37,14 +40,38 @@ examples/
 
 ## Features Implemented
 
-### Core Functionality
+### Core Functionality (14 Tools)
 ✅ JSON-RPC 2.0 protocol implementation  
 ✅ MCP protocol compliance  
-✅ `read_file` tool - Read file contents  
-✅ `write_file` tool - Write file contents  
-✅ `initialize` method - Server initialization  
-✅ `tools/list` method - List available tools  
-✅ `tools/call` method - Execute tool operations  
+
+**Core File Operations:**
+✅ `read_file` - Read file contents  
+✅ `write_file` - Write file contents  
+✅ `append_file` - Append to files (v0.2.0)  
+✅ `read_lines` - Read specific lines or tail files (v0.2.0)  
+
+**Directory Operations:**
+✅ `list_directory` - List directory contents  
+✅ `create_directory` - Create directories (v0.2.0)  
+✅ `remove_directory` - Remove directories (v0.2.0)  
+
+**File Management:**
+✅ `delete_file` - Delete files  
+✅ `move_file` - Move/rename files  
+✅ `copy_file` - Copy files  
+
+**File Information:**
+✅ `get_metadata` - Get file/directory metadata  
+✅ `file_exists` - Check existence (v0.2.0)  
+
+**Search & Discovery:**
+✅ `search_files` - Find files by glob pattern (v0.2.0)  
+✅ `grep_file` - Search file contents with regex (v0.2.0)  
+
+**MCP Methods:**
+✅ `initialize` - Server initialization  
+✅ `tools/list` - List available tools  
+✅ `tools/call` - Execute tool operations  
 
 ### Security Features
 ✅ Path canonicalization to prevent traversal attacks  
