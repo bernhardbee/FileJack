@@ -174,6 +174,179 @@ impl FileReader {
 
         Ok(entries)
     }
+
+    /// Read specific lines from a file
+    pub fn read_lines<P: AsRef<Path>>(
+        &self,
+        path: P,
+        start_line: Option<usize>,
+        end_line: Option<usize>,
+        tail: Option<usize>,
+    ) -> Result<Vec<String>> {
+        let validated_path = self.validate_path(path.as_ref())?;
+        
+        // Open file first to get a file descriptor, preventing TOCTOU
+        let file = File::open(&validated_path).map_err(|e| {
+            match e.kind() {
+                std::io::ErrorKind::NotFound => {
+                    FileJackError::FileNotFound(validated_path.display().to_string())
+                }
+                std::io::ErrorKind::PermissionDenied => {
+                    FileJackError::PermissionDenied(validated_path.display().to_string())
+                }
+                _ => FileJackError::Io(e),
+            }
+        })?;
+        
+        // Validate file metadata using the file descriptor
+        let metadata = file.metadata()?;
+        self.policy.validate_file_size(metadata.len())?;
+        
+        // Verify it's a regular file
+        if !metadata.is_file() {
+            return Err(FileJackError::InvalidPath(
+                "Path is not a regular file".to_string()
+            ));
+        }
+        
+        use std::io::BufRead;
+        let reader = std::io::BufReader::new(file);
+        let all_lines: Vec<String> = reader.lines().collect::<std::io::Result<Vec<_>>>()?;
+        
+        // Handle tail mode
+        if let Some(n) = tail {
+            let start = if all_lines.len() > n {
+                all_lines.len() - n
+            } else {
+                0
+            };
+            return Ok(all_lines[start..].to_vec());
+        }
+        
+        // Handle line range
+        let start_idx = start_line.unwrap_or(1).saturating_sub(1); // Convert to 0-based
+        let end_idx = end_line.unwrap_or(all_lines.len()).min(all_lines.len());
+        
+        if start_idx >= all_lines.len() {
+            return Ok(Vec::new());
+        }
+        
+        Ok(all_lines[start_idx..end_idx].to_vec())
+    }
+
+    /// Search for files matching a glob pattern
+    pub fn search_files<P: AsRef<Path>>(
+        &self,
+        base_path: P,
+        pattern: &str,
+        recursive: bool,
+        max_results: Option<usize>,
+    ) -> Result<Vec<String>> {
+        let validated_path = self.validate_path(base_path.as_ref())?;
+        
+        if !validated_path.is_dir() {
+            return Err(FileJackError::InvalidPath(
+                "Base path must be a directory".to_string()
+            ));
+        }
+        
+        let glob_pattern = glob::Pattern::new(pattern)
+            .map_err(|e| FileJackError::InvalidParameters(format!("Invalid glob pattern: {}", e)))?;
+        
+        let mut results = Vec::new();
+        let walker = if recursive {
+            WalkDir::new(&validated_path).follow_links(self.policy.allow_symlinks)
+        } else {
+            WalkDir::new(&validated_path).max_depth(1).follow_links(self.policy.allow_symlinks)
+        };
+        
+        for entry in walker.into_iter().filter_map(|e| e.ok()) {
+            if let Some(max) = max_results {
+                if results.len() >= max {
+                    break;
+                }
+            }
+            
+            let path = entry.path();
+            if let Some(file_name) = path.file_name() {
+                if let Some(name_str) = file_name.to_str() {
+                    if glob_pattern.matches(name_str) && self.validate_path(path).is_ok() {
+                        results.push(path.display().to_string());
+                    }
+                }
+            }
+        }
+        
+        Ok(results)
+    }
+
+    /// Search for pattern in file contents using regex
+    pub fn grep_file<P: AsRef<Path>>(
+        &self,
+        path: P,
+        pattern: &str,
+        max_matches: Option<usize>,
+        context_lines: Option<usize>,
+    ) -> Result<Vec<crate::protocol::GrepMatch>> {
+        let validated_path = self.validate_path(path.as_ref())?;
+        
+        // Open file first
+        let file = File::open(&validated_path).map_err(|e| {
+            match e.kind() {
+                std::io::ErrorKind::NotFound => {
+                    FileJackError::FileNotFound(validated_path.display().to_string())
+                }
+                std::io::ErrorKind::PermissionDenied => {
+                    FileJackError::PermissionDenied(validated_path.display().to_string())
+                }
+                _ => FileJackError::Io(e),
+            }
+        })?;
+        
+        let metadata = file.metadata()?;
+        self.policy.validate_file_size(metadata.len())?;
+        
+        if !metadata.is_file() {
+            return Err(FileJackError::InvalidPath(
+                "Path is not a regular file".to_string()
+            ));
+        }
+        
+        let regex = regex::Regex::new(pattern)
+            .map_err(|e| FileJackError::InvalidParameters(format!("Invalid regex pattern: {}", e)))?;
+        
+        use std::io::BufRead;
+        let reader = std::io::BufReader::new(file);
+        let all_lines: Vec<String> = reader.lines().collect::<std::io::Result<Vec<_>>>()?;
+        
+        let mut matches = Vec::new();
+        let context = context_lines.unwrap_or(0);
+        
+        for (line_num, line) in all_lines.iter().enumerate() {
+            if regex.is_match(line) {
+                if let Some(max) = max_matches {
+                    if matches.len() >= max {
+                        break;
+                    }
+                }
+                
+                let start_context = line_num.saturating_sub(context);
+                let end_context = (line_num + context + 1).min(all_lines.len());
+                
+                let context_before = all_lines[start_context..line_num].to_vec();
+                let context_after = all_lines[line_num + 1..end_context].to_vec();
+                
+                matches.push(crate::protocol::GrepMatch {
+                    line_number: line_num + 1, // 1-based line numbers
+                    line_content: line.clone(),
+                    context_before,
+                    context_after,
+                });
+            }
+        }
+        
+        Ok(matches)
+    }
 }
 
 /// File metadata information
@@ -369,6 +542,45 @@ impl FileWriter {
         
         let bytes_copied = fs::copy(&validated_from, &validated_to)?;
         Ok(bytes_copied)
+    }
+
+    /// Create a directory
+    pub fn create_directory<P: AsRef<Path>>(&self, path: P, recursive: bool) -> Result<()> {
+        let validated_path = self.validate_path(path.as_ref())?;
+        
+        if validated_path.exists() {
+            return Err(FileJackError::InvalidPath(
+                "Directory already exists".to_string()
+            ));
+        }
+        
+        if recursive {
+            fs::create_dir_all(&validated_path)?;
+        } else {
+            fs::create_dir(&validated_path)?;
+        }
+        
+        Ok(())
+    }
+
+    /// Remove a directory
+    pub fn remove_directory<P: AsRef<Path>>(&self, path: P, recursive: bool) -> Result<()> {
+        let validated_path = self.validate_path(path.as_ref())?;
+        
+        if !validated_path.is_dir() {
+            return Err(FileJackError::InvalidPath(
+                "Path is not a directory or does not exist".to_string()
+            ));
+        }
+        
+        if recursive {
+            fs::remove_dir_all(&validated_path)?;
+        } else {
+            // Only remove if empty
+            fs::remove_dir(&validated_path)?;
+        }
+        
+        Ok(())
     }
 }
 

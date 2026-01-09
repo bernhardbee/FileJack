@@ -10,10 +10,11 @@ FileJack is an MCP server that provides secure file I/O capabilities through a J
 
 - ✅ **MCP Protocol Compliant**: Implements the Model Context Protocol specification with content block format
 - ✅ **JSON-RPC 2.0**: Standard JSON-RPC interface for communication
+- ✅ **14 Comprehensive Tools**: Complete file operation suite (7 core + 7 advanced tools)
 - ✅ **Advanced Access Control**: Fine-grained filesystem access control with configurable policies
 - ✅ **Secure Operations**: Path-based restrictions, extension filtering, and file size limits
 - ✅ **Configuration File Support**: JSON-based configuration for access policies
-- ✅ **Comprehensive Testing**: 72 tests (64 unit + 8 integration)
+- ✅ **Comprehensive Testing**: 107 tests (69 unit + 21 integration + 17 security)
 - ✅ **Error Handling**: Detailed error reporting with helpful messages and debugging logs
 - ✅ **Auto-create Directories**: Automatically creates parent directories when writing files
 - ✅ **UTF-8 Support**: Full Unicode support including emojis
@@ -21,6 +22,8 @@ FileJack is an MCP server that provides secure file I/O capabilities through a J
 - ✅ **Extension Whitelisting/Blacklisting**: Control which file types can be accessed
 - ✅ **Symlink Control**: Configure whether symbolic links can be followed
 - ✅ **Hidden File Control**: Configure access to hidden files
+- ✅ **Large File Support**: Read specific lines, tail mode for efficient log processing
+- ✅ **Search & Discovery**: Glob pattern matching and regex content search
 
 ## Installation
 
@@ -101,6 +104,38 @@ FileJack includes comprehensive access control to prevent misuse. See [ACCESS_CO
 - Configuration examples and best practices
 
 ### Available Tools
+
+FileJack provides **14 comprehensive file operation tools**:
+
+**Core File Operations (4 tools):**
+1. `read_file` - Read file contents
+2. `write_file` - Write/replace file contents (creates parent directories)
+3. `append_file` ⭐ **NEW** - Append to files (essential for logging)
+4. `read_lines` ⭐ **NEW** - Read specific lines or tail files (large file support)
+
+**Directory Operations (3 tools):**
+5. `list_directory` - List directory contents (recursive option)
+6. `create_directory` ⭐ **NEW** - Create directories (recursive option)
+7. `remove_directory` ⭐ **NEW** - Remove directories (recursive option)
+
+**File Management (3 tools):**
+8. `delete_file` - Delete a file
+9. `move_file` - Move/rename files
+10. `copy_file` - Copy files
+
+**File Information (2 tools):**
+11. `get_metadata` - Get file/directory metadata (size, timestamps, permissions)
+12. `file_exists` ⭐ **NEW** - Check if file/directory exists
+
+**Search & Discovery (2 tools):**
+13. `search_files` ⭐ **NEW** - Find files by glob pattern (e.g., `*.log`, `test_*.rs`)
+14. `grep_file` ⭐ **NEW** - Search file contents with regex patterns
+
+**⭐ Version 0.2.0** added 7 new tools for complete file operation coverage!
+
+---
+
+#### Detailed Tool Documentation
 
 #### 1. read_file
 

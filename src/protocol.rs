@@ -92,6 +92,84 @@ pub struct CopyFileParams {
     pub to: String,
 }
 
+/// Append file parameters
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppendFileParams {
+    pub path: String,
+    pub content: String,
+}
+
+/// File exists parameters
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileExistsParams {
+    pub path: String,
+}
+
+/// Create directory parameters
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateDirectoryParams {
+    pub path: String,
+    #[serde(default)]
+    pub recursive: bool,
+}
+
+/// Remove directory parameters
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoveDirectoryParams {
+    pub path: String,
+    #[serde(default)]
+    pub recursive: bool,
+}
+
+/// Read lines parameters
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReadLinesParams {
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_line: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_line: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tail: Option<usize>,
+}
+
+/// Search files parameters
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchFilesParams {
+    pub path: String,
+    pub pattern: String,
+    #[serde(default = "default_true")]
+    pub recursive: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_results: Option<usize>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Grep file parameters
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GrepFileParams {
+    pub path: String,
+    pub pattern: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_matches: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_lines: Option<usize>,
+}
+
+/// Grep match result
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GrepMatch {
+    pub line_number: usize,
+    pub line_content: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub context_before: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub context_after: Vec<String>,
+}
+
 impl JsonRpcResponse {
     pub fn success(id: Option<Value>, result: Value) -> Self {
         Self {

@@ -3,47 +3,40 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 /// Access control policy for filesystem operations
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AccessPolicy {
     /// List of allowed directories (whitelist)
+    #[serde(default)]
     pub allowed_paths: Vec<PathBuf>,
     
     /// List of explicitly denied paths (blacklist, takes precedence)
+    #[serde(default)]
     pub denied_paths: Vec<PathBuf>,
     
     /// List of allowed file extensions (e.g., ["txt", "md", "json"])
     /// Empty means all extensions are allowed
+    #[serde(default)]
     pub allowed_extensions: Vec<String>,
     
     /// List of denied file extensions (takes precedence over allowed)
+    #[serde(default)]
     pub denied_extensions: Vec<String>,
     
     /// Maximum file size in bytes (0 means no limit)
+    #[serde(default)]
     pub max_file_size: u64,
     
     /// Whether symbolic links are allowed
+    #[serde(default)]
     pub allow_symlinks: bool,
     
     /// Whether hidden files (starting with .) are allowed
+    #[serde(default)]
     pub allow_hidden_files: bool,
     
     /// Read-only mode (no write operations allowed)
+    #[serde(default)]
     pub read_only: bool,
-}
-
-impl Default for AccessPolicy {
-    fn default() -> Self {
-        Self {
-            allowed_paths: vec![],
-            denied_paths: vec![],
-            allowed_extensions: vec![],
-            denied_extensions: vec![],
-            max_file_size: 0,
-            allow_symlinks: false,
-            allow_hidden_files: false,
-            read_only: false,
-        }
-    }
 }
 
 impl AccessPolicy {

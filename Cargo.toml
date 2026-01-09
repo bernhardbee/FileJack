@@ -1,6 +1,6 @@
 [package]
 name = "filejack"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["FileJack Contributors"]
 description = "MCP Server for Reading and Writing Files"
@@ -16,6 +16,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 walkdir = "2.4"
 governor = "0.6"
 nonzero_ext = "0.3"
+glob = "0.3"
+regex = "1.10"
 
 [dev-dependencies]
 tempfile = "3.8"

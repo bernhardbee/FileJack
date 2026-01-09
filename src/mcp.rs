@@ -4,6 +4,8 @@ use crate::file_ops::{FileReader, FileWriter};
 use crate::protocol::{
     JsonRpcRequest, JsonRpcResponse, McpTool, ReadFileParams, WriteFileParams,
     ListDirectoryParams, GetMetadataParams, DeleteFileParams, MoveFileParams, CopyFileParams,
+    AppendFileParams, FileExistsParams, CreateDirectoryParams, RemoveDirectoryParams,
+    ReadLinesParams, SearchFilesParams, GrepFileParams,
 };
 use crate::rate_limit::RateLimiter;
 use serde_json::{json, Value};
@@ -151,6 +153,155 @@ impl McpServer {
                         }
                     },
                     "required": ["from", "to"]
+                }),
+            },
+            McpTool {
+                name: "append_file".to_string(),
+                description: "Append content to a file (creates if not exists)".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Path to the file"
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "Content to append"
+                        }
+                    },
+                    "required": ["path", "content"]
+                }),
+            },
+            McpTool {
+                name: "file_exists".to_string(),
+                description: "Check if a file or directory exists".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Path to check"
+                        }
+                    },
+                    "required": ["path"]
+                }),
+            },
+            McpTool {
+                name: "create_directory".to_string(),
+                description: "Create a new directory".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Path to the directory to create"
+                        },
+                        "recursive": {
+                            "type": "boolean",
+                            "description": "Create parent directories if they don't exist",
+                            "default": false
+                        }
+                    },
+                    "required": ["path"]
+                }),
+            },
+            McpTool {
+                name: "remove_directory".to_string(),
+                description: "Remove a directory".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Path to the directory to remove"
+                        },
+                        "recursive": {
+                            "type": "boolean",
+                            "description": "Remove directory and all its contents",
+                            "default": false
+                        }
+                    },
+                    "required": ["path"]
+                }),
+            },
+            McpTool {
+                name: "read_lines".to_string(),
+                description: "Read specific lines from a file".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Path to the file"
+                        },
+                        "start_line": {
+                            "type": "number",
+                            "description": "Starting line number (1-based, inclusive)"
+                        },
+                        "end_line": {
+                            "type": "number",
+                            "description": "Ending line number (1-based, inclusive)"
+                        },
+                        "tail": {
+                            "type": "number",
+                            "description": "Read last N lines (overrides start_line/end_line)"
+                        }
+                    },
+                    "required": ["path"]
+                }),
+            },
+            McpTool {
+                name: "search_files".to_string(),
+                description: "Search for files matching a glob pattern".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Base directory to search in"
+                        },
+                        "pattern": {
+                            "type": "string",
+                            "description": "Glob pattern (e.g., '*.log', 'test_*.rs')"
+                        },
+                        "recursive": {
+                            "type": "boolean",
+                            "description": "Search recursively in subdirectories",
+                            "default": true
+                        },
+                        "max_results": {
+                            "type": "number",
+                            "description": "Maximum number of results to return"
+                        }
+                    },
+                    "required": ["path", "pattern"]
+                }),
+            },
+            McpTool {
+                name: "grep_file".to_string(),
+                description: "Search for patterns in file contents using regex".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Path to the file to search"
+                        },
+                        "pattern": {
+                            "type": "string",
+                            "description": "Regular expression pattern"
+                        },
+                        "max_matches": {
+                            "type": "number",
+                            "description": "Maximum number of matches to return"
+                        },
+                        "context_lines": {
+                            "type": "number",
+                            "description": "Number of context lines before and after each match"
+                        }
+                    },
+                    "required": ["path", "pattern"]
                 }),
             },
         ]
@@ -309,6 +460,153 @@ impl McpServer {
                     ]
                 }))
             }
+            "append_file" => {
+                let params: AppendFileParams = serde_json::from_value(arguments.clone())
+                    .map_err(|e| {
+                        error!("Failed to parse append_file params: {}", e);
+                        FileJackError::InvalidParameters(
+                            format!("Invalid parameters for append_file: {}. Expected: {{\"path\": \"string\", \"content\": \"string\"}}", e)
+                        )
+                    })?;
+                
+                info!(path = %params.path, size = params.content.len(), "Appending to file");
+                self.writer.append_string(&params.path, &params.content)?;
+                info!(path = %params.path, "Content appended successfully");
+                Ok(json!({
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": format!("Successfully appended {} bytes to {}", params.content.len(), params.path)
+                        }
+                    ]
+                }))
+            }
+            "file_exists" => {
+                let params: FileExistsParams = serde_json::from_value(arguments.clone())
+                    .map_err(|e| {
+                        error!("Failed to parse file_exists params: {}", e);
+                        FileJackError::InvalidParameters(
+                            format!("Invalid parameters for file_exists: {}. Expected: {{\"path\": \"string\"}}", e)
+                        )
+                    })?;
+                
+                debug!(path = %params.path, "Checking if file exists");
+                let exists = self.reader.exists(&params.path);
+                debug!(path = %params.path, exists = exists, "File existence checked");
+                Ok(json!({
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": exists.to_string()
+                        }
+                    ]
+                }))
+            }
+            "create_directory" => {
+                let params: CreateDirectoryParams = serde_json::from_value(arguments.clone())
+                    .map_err(|e| {
+                        error!("Failed to parse create_directory params: {}", e);
+                        FileJackError::InvalidParameters(
+                            format!("Invalid parameters for create_directory: {}. Expected: {{\"path\": \"string\", \"recursive\": boolean}}", e)
+                        )
+                    })?;
+                
+                info!(path = %params.path, recursive = params.recursive, "Creating directory");
+                self.writer.create_directory(&params.path, params.recursive)?;
+                info!(path = %params.path, "Directory created successfully");
+                Ok(json!({
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": format!("Successfully created directory {}", params.path)
+                        }
+                    ]
+                }))
+            }
+            "remove_directory" => {
+                let params: RemoveDirectoryParams = serde_json::from_value(arguments.clone())
+                    .map_err(|e| {
+                        error!("Failed to parse remove_directory params: {}", e);
+                        FileJackError::InvalidParameters(
+                            format!("Invalid parameters for remove_directory: {}. Expected: {{\"path\": \"string\", \"recursive\": boolean}}", e)
+                        )
+                    })?;
+                
+                info!(path = %params.path, recursive = params.recursive, "Removing directory");
+                self.writer.remove_directory(&params.path, params.recursive)?;
+                info!(path = %params.path, "Directory removed successfully");
+                Ok(json!({
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": format!("Successfully removed directory {}", params.path)
+                        }
+                    ]
+                }))
+            }
+            "read_lines" => {
+                let params: ReadLinesParams = serde_json::from_value(arguments.clone())
+                    .map_err(|e| {
+                        error!("Failed to parse read_lines params: {}", e);
+                        FileJackError::InvalidParameters(
+                            format!("Invalid parameters for read_lines: {}. Expected: {{\"path\": \"string\", \"start_line\": number, \"end_line\": number, \"tail\": number}}", e)
+                        )
+                    })?;
+                
+                info!(path = %params.path, "Reading lines from file");
+                let lines = self.reader.read_lines(&params.path, params.start_line, params.end_line, params.tail)?;
+                info!(path = %params.path, line_count = lines.len(), "Lines read successfully");
+                Ok(json!({
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": lines.join("\n")
+                        }
+                    ]
+                }))
+            }
+            "search_files" => {
+                let params: SearchFilesParams = serde_json::from_value(arguments.clone())
+                    .map_err(|e| {
+                        error!("Failed to parse search_files params: {}", e);
+                        FileJackError::InvalidParameters(
+                            format!("Invalid parameters for search_files: {}. Expected: {{\"path\": \"string\", \"pattern\": \"string\", \"recursive\": boolean, \"max_results\": number}}", e)
+                        )
+                    })?;
+                
+                info!(path = %params.path, pattern = %params.pattern, "Searching for files");
+                let results = self.reader.search_files(&params.path, &params.pattern, params.recursive, params.max_results)?;
+                info!(path = %params.path, count = results.len(), "Search completed");
+                Ok(json!({
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": serde_json::to_string_pretty(&results).unwrap()
+                        }
+                    ]
+                }))
+            }
+            "grep_file" => {
+                let params: GrepFileParams = serde_json::from_value(arguments.clone())
+                    .map_err(|e| {
+                        error!("Failed to parse grep_file params: {}", e);
+                        FileJackError::InvalidParameters(
+                            format!("Invalid parameters for grep_file: {}. Expected: {{\"path\": \"string\", \"pattern\": \"string\", \"max_matches\": number, \"context_lines\": number}}", e)
+                        )
+                    })?;
+                
+                info!(path = %params.path, pattern = %params.pattern, "Searching file contents");
+                let matches = self.reader.grep_file(&params.path, &params.pattern, params.max_matches, params.context_lines)?;
+                info!(path = %params.path, match_count = matches.len(), "Search completed");
+                Ok(json!({
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": serde_json::to_string_pretty(&matches).unwrap()
+                        }
+                    ]
+                }))
+            }
             _ => {
                 warn!(tool = name, "Tool not found");
                 Err(FileJackError::ToolNotFound(name.to_string()))
@@ -450,7 +748,7 @@ mod tests {
         let server = McpServer::new(policy);
         let tools = server.list_tools();
         
-        assert_eq!(tools.len(), 7); // Updated: read_file, write_file, list_directory, get_metadata, delete_file, move_file, copy_file
+        assert_eq!(tools.len(), 14); // Updated: all 14 tools including new ones
         assert!(tools.iter().any(|t| t.name == "read_file"));
         assert!(tools.iter().any(|t| t.name == "write_file"));
         assert!(tools.iter().any(|t| t.name == "list_directory"));
@@ -458,6 +756,13 @@ mod tests {
         assert!(tools.iter().any(|t| t.name == "delete_file"));
         assert!(tools.iter().any(|t| t.name == "move_file"));
         assert!(tools.iter().any(|t| t.name == "copy_file"));
+        assert!(tools.iter().any(|t| t.name == "append_file"));
+        assert!(tools.iter().any(|t| t.name == "file_exists"));
+        assert!(tools.iter().any(|t| t.name == "create_directory"));
+        assert!(tools.iter().any(|t| t.name == "remove_directory"));
+        assert!(tools.iter().any(|t| t.name == "read_lines"));
+        assert!(tools.iter().any(|t| t.name == "search_files"));
+        assert!(tools.iter().any(|t| t.name == "grep_file"));
     }
 
     #[test]
