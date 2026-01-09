@@ -1,7 +1,10 @@
 use crate::access_control::AccessPolicy;
 use crate::error::{FileJackError, Result};
-use std::fs;
+use serde::{Deserialize, Serialize};
+use std::fs::{self, File, OpenOptions};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use walkdir::WalkDir;
 
 /// FileReader handles reading operations from the filesystem
 #[derive(Debug, Clone)]
@@ -20,16 +23,12 @@ impl FileReader {
         self.policy.validate_read(path)
     }
 
-    /// Read file contents as a string
+    /// Read file contents as a string with atomic validation
     pub fn read_to_string<P: AsRef<Path>>(&self, path: P) -> Result<String> {
         let validated_path = self.validate_path(path.as_ref())?;
         
-        // Check file size
-        if let Ok(metadata) = fs::metadata(&validated_path) {
-            self.policy.validate_file_size(metadata.len())?;
-        }
-        
-        fs::read_to_string(&validated_path).map_err(|e| {
+        // Open file first to get a file descriptor, preventing TOCTOU
+        let mut file = File::open(&validated_path).map_err(|e| {
             match e.kind() {
                 std::io::ErrorKind::NotFound => {
                     FileJackError::FileNotFound(validated_path.display().to_string())
@@ -39,19 +38,31 @@ impl FileReader {
                 }
                 _ => FileJackError::Io(e),
             }
-        })
+        })?;
+        
+        // Validate file metadata using the file descriptor
+        let metadata = file.metadata()?;
+        self.policy.validate_file_size(metadata.len())?;
+        
+        // Verify it's still a regular file (not replaced with symlink)
+        if !metadata.is_file() {
+            return Err(FileJackError::InvalidPath(
+                "Path is not a regular file".to_string()
+            ));
+        }
+        
+        // Read from the already-opened file descriptor
+        let mut content = String::new();
+        file.read_to_string(&mut content)?;
+        Ok(content)
     }
 
-    /// Read file contents as bytes
+    /// Read file contents as bytes with atomic validation
     pub fn read_to_bytes<P: AsRef<Path>>(&self, path: P) -> Result<Vec<u8>> {
         let validated_path = self.validate_path(path.as_ref())?;
         
-        // Check file size
-        if let Ok(metadata) = fs::metadata(&validated_path) {
-            self.policy.validate_file_size(metadata.len())?;
-        }
-        
-        fs::read(&validated_path).map_err(|e| {
+        // Open file first to get a file descriptor, preventing TOCTOU
+        let mut file = File::open(&validated_path).map_err(|e| {
             match e.kind() {
                 std::io::ErrorKind::NotFound => {
                     FileJackError::FileNotFound(validated_path.display().to_string())
@@ -61,13 +72,130 @@ impl FileReader {
                 }
                 _ => FileJackError::Io(e),
             }
-        })
+        })?;
+        
+        // Validate file metadata using the file descriptor
+        let metadata = file.metadata()?;
+        self.policy.validate_file_size(metadata.len())?;
+        
+        // Verify it's still a regular file
+        if !metadata.is_file() {
+            return Err(FileJackError::InvalidPath(
+                "Path is not a regular file".to_string()
+            ));
+        }
+        
+        // Read from the already-opened file descriptor
+        let mut content = Vec::new();
+        file.read_to_end(&mut content)?;
+        Ok(content)
     }
 
     /// Check if a file exists
     pub fn exists<P: AsRef<Path>>(&self, path: P) -> bool {
         path.as_ref().exists()
     }
+
+    /// Get file metadata
+    pub fn get_metadata<P: AsRef<Path>>(&self, path: P) -> Result<FileMetadata> {
+        let validated_path = self.validate_path(path.as_ref())?;
+        let metadata = fs::metadata(&validated_path)?;
+        
+        Ok(FileMetadata {
+            size: metadata.len(),
+            is_file: metadata.is_file(),
+            is_dir: metadata.is_dir(),
+            is_symlink: metadata.is_symlink(),
+            modified: metadata.modified().ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs()),
+            created: metadata.created().ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs()),
+            readonly: metadata.permissions().readonly(),
+        })
+    }
+
+    /// List directory contents
+    pub fn list_directory<P: AsRef<Path>>(&self, path: P, recursive: bool) -> Result<Vec<DirectoryEntry>> {
+        let validated_path = self.validate_path(path.as_ref())?;
+        
+        if !validated_path.is_dir() {
+            return Err(FileJackError::InvalidPath(
+                "Path is not a directory".to_string()
+            ));
+        }
+
+        let mut entries = Vec::new();
+
+        if recursive {
+            for entry in WalkDir::new(&validated_path)
+                .follow_links(self.policy.allow_symlinks)
+                .into_iter()
+                .filter_map(|e| e.ok())
+            {
+                let path = entry.path();
+                if path == validated_path {
+                    continue; // Skip the root directory itself
+                }
+                
+                // Validate each entry against policy
+                if self.validate_path(path).is_ok() {
+                    entries.push(DirectoryEntry {
+                        path: path.display().to_string(),
+                        name: path.file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        is_file: entry.file_type().is_file(),
+                        is_dir: entry.file_type().is_dir(),
+                        size: entry.metadata().ok().map(|m| m.len()),
+                    });
+                }
+            }
+        } else {
+            for entry in fs::read_dir(&validated_path)? {
+                let entry = entry?;
+                let path = entry.path();
+                
+                // Validate each entry against policy
+                if self.validate_path(&path).is_ok() {
+                    let metadata = entry.metadata()?;
+                    entries.push(DirectoryEntry {
+                        path: path.display().to_string(),
+                        name: entry.file_name().to_string_lossy().to_string(),
+                        is_file: metadata.is_file(),
+                        is_dir: metadata.is_dir(),
+                        size: Some(metadata.len()),
+                    });
+                }
+            }
+        }
+
+        Ok(entries)
+    }
+}
+
+/// File metadata information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileMetadata {
+    pub size: u64,
+    pub is_file: bool,
+    pub is_dir: bool,
+    pub is_symlink: bool,
+    pub modified: Option<u64>,
+    pub created: Option<u64>,
+    pub readonly: bool,
+}
+
+/// Directory entry information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DirectoryEntry {
+    pub path: String,
+    pub name: String,
+    pub is_file: bool,
+    pub is_dir: bool,
+    pub size: Option<u64>,
 }
 
 /// FileWriter handles writing operations to the filesystem
@@ -91,11 +219,11 @@ impl FileWriter {
         self.policy.validate_write(path)
     }
 
-    /// Write string content to a file
+    /// Write string content to a file atomically
     pub fn write_string<P: AsRef<Path>>(&self, path: P, content: &str) -> Result<()> {
         let validated_path = self.validate_path(path.as_ref())?;
 
-        // Check file size
+        // Check file size before writing
         self.policy.validate_file_size(content.len() as u64)?;
 
         if self.create_dirs {
@@ -104,26 +232,45 @@ impl FileWriter {
             }
         }
 
-        fs::write(&validated_path, content).map_err(|e| {
-            match e.kind() {
-                std::io::ErrorKind::PermissionDenied => {
-                    FileJackError::PermissionDenied(validated_path.display().to_string())
+        // Open with explicit options to prevent TOCTOU
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&validated_path)
+            .map_err(|e| {
+                match e.kind() {
+                    std::io::ErrorKind::PermissionDenied => {
+                        FileJackError::PermissionDenied(validated_path.display().to_string())
+                    }
+                    std::io::ErrorKind::NotFound => {
+                        FileJackError::FileNotFound(
+                            format!("Parent directory does not exist: {}", validated_path.display())
+                        )
+                    }
+                    _ => FileJackError::Io(e),
                 }
-                std::io::ErrorKind::NotFound => {
-                    FileJackError::FileNotFound(
-                        format!("Parent directory does not exist: {}", validated_path.display())
-                    )
-                }
-                _ => FileJackError::Io(e),
-            }
-        })
+            })?;
+        
+        // Verify we opened a regular file, not a symlink or special file
+        let metadata = file.metadata()?;
+        if !metadata.is_file() {
+            return Err(FileJackError::InvalidPath(
+                "Cannot write to non-regular file".to_string()
+            ));
+        }
+        
+        // Write using the file descriptor
+        file.write_all(content.as_bytes())?;
+        file.sync_all()?; // Ensure data is written to disk
+        Ok(())
     }
 
-    /// Write bytes to a file
+    /// Write bytes to a file atomically
     pub fn write_bytes<P: AsRef<Path>>(&self, path: P, content: &[u8]) -> Result<()> {
         let validated_path = self.validate_path(path.as_ref())?;
 
-        // Check file size
+        // Check file size before writing
         self.policy.validate_file_size(content.len() as u64)?;
 
         if self.create_dirs {
@@ -132,19 +279,38 @@ impl FileWriter {
             }
         }
 
-        fs::write(&validated_path, content).map_err(|e| {
-            match e.kind() {
-                std::io::ErrorKind::PermissionDenied => {
-                    FileJackError::PermissionDenied(validated_path.display().to_string())
+        // Open with explicit options to prevent TOCTOU
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&validated_path)
+            .map_err(|e| {
+                match e.kind() {
+                    std::io::ErrorKind::PermissionDenied => {
+                        FileJackError::PermissionDenied(validated_path.display().to_string())
+                    }
+                    std::io::ErrorKind::NotFound => {
+                        FileJackError::FileNotFound(
+                            format!("Parent directory does not exist: {}", validated_path.display())
+                        )
+                    }
+                    _ => FileJackError::Io(e),
                 }
-                std::io::ErrorKind::NotFound => {
-                    FileJackError::FileNotFound(
-                        format!("Parent directory does not exist: {}", validated_path.display())
-                    )
-                }
-                _ => FileJackError::Io(e),
-            }
-        })
+            })?;
+        
+        // Verify we opened a regular file
+        let metadata = file.metadata()?;
+        if !metadata.is_file() {
+            return Err(FileJackError::InvalidPath(
+                "Cannot write to non-regular file".to_string()
+            ));
+        }
+        
+        // Write using the file descriptor
+        file.write_all(content)?;
+        file.sync_all()?; // Ensure data is written to disk
+        Ok(())
     }
 
     /// Append string content to a file
@@ -159,6 +325,50 @@ impl FileWriter {
         
         file.write_all(content.as_bytes())?;
         Ok(())
+    }
+
+    /// Delete a file
+    pub fn delete_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+        let validated_path = self.validate_path(path.as_ref())?;
+        
+        if !validated_path.is_file() {
+            return Err(FileJackError::InvalidPath(
+                "Path is not a file or does not exist".to_string()
+            ));
+        }
+        
+        fs::remove_file(&validated_path)?;
+        Ok(())
+    }
+
+    /// Move/rename a file
+    pub fn move_file<P: AsRef<Path>, Q: AsRef<Path>>(&self, from: P, to: Q) -> Result<()> {
+        let validated_from = self.validate_path(from.as_ref())?;
+        let validated_to = self.validate_path(to.as_ref())?;
+        
+        if !validated_from.exists() {
+            return Err(FileJackError::FileNotFound(
+                validated_from.display().to_string()
+            ));
+        }
+        
+        fs::rename(&validated_from, &validated_to)?;
+        Ok(())
+    }
+
+    /// Copy a file
+    pub fn copy_file<P: AsRef<Path>, Q: AsRef<Path>>(&self, from: P, to: Q) -> Result<u64> {
+        let validated_from = self.validate_path(from.as_ref())?;
+        let validated_to = self.validate_path(to.as_ref())?;
+        
+        if !validated_from.is_file() {
+            return Err(FileJackError::InvalidPath(
+                "Source path is not a file".to_string()
+            ));
+        }
+        
+        let bytes_copied = fs::copy(&validated_from, &validated_to)?;
+        Ok(bytes_copied)
     }
 }
 

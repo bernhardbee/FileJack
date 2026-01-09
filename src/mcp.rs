@@ -3,13 +3,17 @@ use crate::error::{FileJackError, Result};
 use crate::file_ops::{FileReader, FileWriter};
 use crate::protocol::{
     JsonRpcRequest, JsonRpcResponse, McpTool, ReadFileParams, WriteFileParams,
+    ListDirectoryParams, GetMetadataParams, DeleteFileParams, MoveFileParams, CopyFileParams,
 };
+use crate::rate_limit::RateLimiter;
 use serde_json::{json, Value};
+use tracing::{debug, error, info, warn};
 
 /// MCP Server for file operations
 pub struct McpServer {
     reader: FileReader,
     writer: FileWriter,
+    rate_limiter: RateLimiter,
 }
 
 impl McpServer {
@@ -18,6 +22,16 @@ impl McpServer {
         Self {
             reader: FileReader::new(policy.clone()),
             writer: FileWriter::new(policy, true),
+            rate_limiter: RateLimiter::moderate(),
+        }
+    }
+
+    /// Create a new MCP Server with custom rate limiter
+    pub fn with_rate_limiter(policy: AccessPolicy, rate_limiter: RateLimiter) -> Self {
+        Self {
+            reader: FileReader::new(policy.clone()),
+            writer: FileWriter::new(policy, true),
+            rate_limiter,
         }
     }
 
@@ -56,25 +70,110 @@ impl McpServer {
                     "required": ["path", "content"]
                 }),
             },
+            McpTool {
+                name: "list_directory".to_string(),
+                description: "List contents of a directory".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Path to the directory to list"
+                        },
+                        "recursive": {
+                            "type": "boolean",
+                            "description": "Whether to list recursively",
+                            "default": false
+                        }
+                    },
+                    "required": ["path"]
+                }),
+            },
+            McpTool {
+                name: "get_metadata".to_string(),
+                description: "Get metadata information about a file".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Path to the file"
+                        }
+                    },
+                    "required": ["path"]
+                }),
+            },
+            McpTool {
+                name: "delete_file".to_string(),
+                description: "Delete a file".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Path to the file to delete"
+                        }
+                    },
+                    "required": ["path"]
+                }),
+            },
+            McpTool {
+                name: "move_file".to_string(),
+                description: "Move or rename a file".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "from": {
+                            "type": "string",
+                            "description": "Source file path"
+                        },
+                        "to": {
+                            "type": "string",
+                            "description": "Destination file path"
+                        }
+                    },
+                    "required": ["from", "to"]
+                }),
+            },
+            McpTool {
+                name: "copy_file".to_string(),
+                description: "Copy a file".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "from": {
+                            "type": "string",
+                            "description": "Source file path"
+                        },
+                        "to": {
+                            "type": "string",
+                            "description": "Destination file path"
+                        }
+                    },
+                    "required": ["from", "to"]
+                }),
+            },
         ]
     }
 
     /// Handle a tool call
     pub fn handle_tool_call(&self, name: &str, arguments: Value) -> Result<Value> {
         // Log the arguments received for debugging
-        eprintln!("Tool '{}' called with arguments: {}", name, arguments);
+        debug!(tool = name, "Tool called with arguments: {}", arguments);
         
         match name {
             "read_file" => {
                 let params: ReadFileParams = serde_json::from_value(arguments.clone())
                     .map_err(|e| {
-                        eprintln!("Failed to parse read_file params from: {}", arguments);
+                        error!("Failed to parse read_file params: {}", e);
                         FileJackError::InvalidParameters(
                             format!("Invalid parameters for read_file: {}. Expected: {{\"path\": \"string\"}}", e)
                         )
                     })?;
                 
+                info!(path = %params.path, "Reading file");
                 let content = self.reader.read_to_string(&params.path)?;
+                info!(path = %params.path, size = content.len(), "File read successfully");
                 Ok(json!({
                     "content": [
                         {
@@ -87,13 +186,15 @@ impl McpServer {
             "write_file" => {
                 let params: WriteFileParams = serde_json::from_value(arguments.clone())
                     .map_err(|e| {
-                        eprintln!("Failed to parse write_file params from: {}", arguments);
+                        error!("Failed to parse write_file params: {}", e);
                         FileJackError::InvalidParameters(
                             format!("Invalid parameters for write_file: {}. Expected: {{\"path\": \"string\", \"content\": \"string\"}}", e)
                         )
                     })?;
                 
+                info!(path = %params.path, size = params.content.len(), "Writing file");
                 self.writer.write_string(&params.path, &params.content)?;
+                info!(path = %params.path, "File written successfully");
                 Ok(json!({
                     "content": [
                         {
@@ -103,14 +204,125 @@ impl McpServer {
                     ]
                 }))
             }
-            _ => Err(FileJackError::ToolNotFound(name.to_string())),
+            "list_directory" => {
+                let params: ListDirectoryParams = serde_json::from_value(arguments.clone())
+                    .map_err(|e| {
+                        error!("Failed to parse list_directory params: {}", e);
+                        FileJackError::InvalidParameters(
+                            format!("Invalid parameters for list_directory: {}. Expected: {{\"path\": \"string\", \"recursive\": boolean}}", e)
+                        )
+                    })?;
+                
+                info!(path = %params.path, recursive = params.recursive, "Listing directory");
+                let entries = self.reader.list_directory(&params.path, params.recursive)?;
+                info!(path = %params.path, count = entries.len(), "Directory listed successfully");
+                Ok(json!({
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": serde_json::to_string_pretty(&entries).unwrap()
+                        }
+                    ]
+                }))
+            }
+            "get_metadata" => {
+                let params: GetMetadataParams = serde_json::from_value(arguments.clone())
+                    .map_err(|e| {
+                        error!("Failed to parse get_metadata params: {}", e);
+                        FileJackError::InvalidParameters(
+                            format!("Invalid parameters for get_metadata: {}. Expected: {{\"path\": \"string\"}}", e)
+                        )
+                    })?;
+                
+                info!(path = %params.path, "Getting metadata");
+                let metadata = self.reader.get_metadata(&params.path)?;
+                info!(path = %params.path, "Metadata retrieved successfully");
+                Ok(json!({
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": serde_json::to_string_pretty(&metadata).unwrap()
+                        }
+                    ]
+                }))
+            }
+            "delete_file" => {
+                let params: DeleteFileParams = serde_json::from_value(arguments.clone())
+                    .map_err(|e| {
+                        error!("Failed to parse delete_file params: {}", e);
+                        FileJackError::InvalidParameters(
+                            format!("Invalid parameters for delete_file: {}. Expected: {{\"path\": \"string\"}}", e)
+                        )
+                    })?;
+                
+                info!(path = %params.path, "Deleting file");
+                self.writer.delete_file(&params.path)?;
+                info!(path = %params.path, "File deleted successfully");
+                Ok(json!({
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": format!("Successfully deleted {}", params.path)
+                        }
+                    ]
+                }))
+            }
+            "move_file" => {
+                let params: MoveFileParams = serde_json::from_value(arguments.clone())
+                    .map_err(|e| {
+                        error!("Failed to parse move_file params: {}", e);
+                        FileJackError::InvalidParameters(
+                            format!("Invalid parameters for move_file: {}. Expected: {{\"from\": \"string\", \"to\": \"string\"}}", e)
+                        )
+                    })?;
+                
+                info!(from = %params.from, to = %params.to, "Moving file");
+                self.writer.move_file(&params.from, &params.to)?;
+                info!(from = %params.from, to = %params.to, "File moved successfully");
+                Ok(json!({
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": format!("Successfully moved {} to {}", params.from, params.to)
+                        }
+                    ]
+                }))
+            }
+            "copy_file" => {
+                let params: CopyFileParams = serde_json::from_value(arguments.clone())
+                    .map_err(|e| {
+                        error!("Failed to parse copy_file params: {}", e);
+                        FileJackError::InvalidParameters(
+                            format!("Invalid parameters for copy_file: {}. Expected: {{\"from\": \"string\", \"to\": \"string\"}}", e)
+                        )
+                    })?;
+                
+                info!(from = %params.from, to = %params.to, "Copying file");
+                let bytes_copied = self.writer.copy_file(&params.from, &params.to)?;
+                info!(from = %params.from, to = %params.to, bytes = bytes_copied, "File copied successfully");
+                Ok(json!({
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": format!("Successfully copied {} to {} ({} bytes)", params.from, params.to, bytes_copied)
+                        }
+                    ]
+                }))
+            }
+            _ => {
+                warn!(tool = name, "Tool not found");
+                Err(FileJackError::ToolNotFound(name.to_string()))
+            }
         }
     }
 
     /// Handle a JSON-RPC request
     pub fn handle_request(&self, request: JsonRpcRequest) -> JsonRpcResponse {
+        debug!(method = %request.method, id = ?request.id, "Handling request");
+        
         match request.method.as_str() {
             "tools/list" => {
+                debug!("Listing available tools");
                 let tools = self.list_tools();
                 let tools_value = serde_json::to_value(&tools).unwrap();
                 JsonRpcResponse::success(request.id, json!({"tools": tools_value}))
@@ -118,7 +330,7 @@ impl McpServer {
             "tools/call" => {
                 let params = request.params.unwrap_or(json!({}));
                 
-                eprintln!("tools/call received params: {}", params);
+                debug!("tools/call received params: {}", params);
                 
                 let tool_name = params.get("name")
                     .and_then(|v| v.as_str())
@@ -128,12 +340,15 @@ impl McpServer {
                     .cloned()
                     .unwrap_or(json!({}));
                 
-                eprintln!("Extracted tool_name: '{}', arguments: {}", tool_name, arguments);
+                debug!("Extracted tool_name: '{}', arguments: {}", tool_name, arguments);
 
                 match self.handle_tool_call(tool_name, arguments) {
-                    Ok(result) => JsonRpcResponse::success(request.id, result),
+                    Ok(result) => {
+                        info!(tool = tool_name, "Tool call successful");
+                        JsonRpcResponse::success(request.id, result)
+                    }
                     Err(e) => {
-                        eprintln!("Tool call error: {}", e);
+                        error!(tool = tool_name, error = %e, "Tool call failed");
                         JsonRpcResponse::error(
                             request.id,
                             -32000,
@@ -143,6 +358,7 @@ impl McpServer {
                 }
             }
             "initialize" => {
+                info!("Server initialized");
                 JsonRpcResponse::success(
                     request.id,
                     json!({
@@ -157,16 +373,30 @@ impl McpServer {
                     }),
                 )
             }
-            _ => JsonRpcResponse::error(
-                request.id,
-                -32601,
-                format!("Method not found: {}", request.method),
-            ),
+            _ => {
+                warn!(method = %request.method, "Method not found");
+                JsonRpcResponse::error(
+                    request.id,
+                    -32601,
+                    format!("Method not found: {}", request.method),
+                )
+            }
         }
     }
 
     /// Process a JSON-RPC request from a string
     pub fn process_request(&self, request_str: &str) -> String {
+        // Check rate limit
+        if !self.rate_limiter.check() {
+            warn!("Rate limit exceeded");
+            let error_response = JsonRpcResponse::error(
+                None,
+                -32000,
+                "Rate limit exceeded. Please slow down requests.".to_string(),
+            );
+            return serde_json::to_string(&error_response).unwrap();
+        }
+
         match serde_json::from_str::<JsonRpcRequest>(request_str) {
             Ok(request) => {
                 // JSON-RPC 2.0: If id is None, it's a notification and should not be responded to
@@ -181,6 +411,7 @@ impl McpServer {
                 serde_json::to_string(&response).unwrap()
             }
             Err(e) => {
+                error!("Failed to parse request: {}", e);
                 let error_response = JsonRpcResponse::error(
                     None,
                     -32700,
@@ -219,9 +450,14 @@ mod tests {
         let server = McpServer::new(policy);
         let tools = server.list_tools();
         
-        assert_eq!(tools.len(), 2);
+        assert_eq!(tools.len(), 7); // Updated: read_file, write_file, list_directory, get_metadata, delete_file, move_file, copy_file
         assert!(tools.iter().any(|t| t.name == "read_file"));
         assert!(tools.iter().any(|t| t.name == "write_file"));
+        assert!(tools.iter().any(|t| t.name == "list_directory"));
+        assert!(tools.iter().any(|t| t.name == "get_metadata"));
+        assert!(tools.iter().any(|t| t.name == "delete_file"));
+        assert!(tools.iter().any(|t| t.name == "move_file"));
+        assert!(tools.iter().any(|t| t.name == "copy_file"));
     }
 
     #[test]

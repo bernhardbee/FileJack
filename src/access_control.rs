@@ -116,7 +116,12 @@ impl AccessPolicy {
         // For write operations, we need to handle non-existent files
         // Find the first existing ancestor directory
         let mut path_to_check = path.to_path_buf();
+        let mut non_existent_parts = Vec::new();
+        
         while !path_to_check.exists() {
+            if let Some(file_name) = path_to_check.file_name() {
+                non_existent_parts.push(file_name.to_os_string());
+            }
             path_to_check = match path_to_check.parent() {
                 Some(parent) => parent.to_path_buf(),
                 None => return Err(FileJackError::InvalidPath(
@@ -125,18 +130,26 @@ impl AccessPolicy {
             };
         }
 
+        // Canonicalize the existing ancestor
         let canonical = self.canonicalize_path(&path_to_check)?;
         
-        // Check if path is denied
-        self.check_denied_paths(&canonical)?;
+        // Reconstruct the full path by appending non-existent parts
+        let mut full_canonical = canonical;
+        non_existent_parts.reverse();
+        for part in non_existent_parts {
+            full_canonical.push(part);
+        }
         
-        // Check if path is in allowed directories
-        self.check_allowed_paths(&canonical)?;
+        // Check if reconstructed path is denied
+        self.check_denied_paths(&full_canonical)?;
         
-        // Check file extension
+        // Check if reconstructed path is in allowed directories
+        self.check_allowed_paths(&full_canonical)?;
+        
+        // Check file extension on the original path (which has the filename)
         self.check_extension(path)?;
         
-        // Check hidden files
+        // Check hidden files on the original path
         self.check_hidden_files(path)?;
         
         Ok(path.to_path_buf())
@@ -195,6 +208,11 @@ impl AccessPolicy {
     }
 
     fn check_extension(&self, path: &Path) -> Result<()> {
+        // Skip extension check for directories
+        if path.is_dir() {
+            return Ok(());
+        }
+        
         if let Some(ext) = path.extension() {
             let ext_str = ext.to_string_lossy().to_lowercase();
             
@@ -220,7 +238,7 @@ impl AccessPolicy {
                     ));
                 }
             }
-        } else if !self.allowed_extensions.is_empty() {
+        } else if !self.allowed_extensions.is_empty() && !path.is_dir() {
             // File has no extension but allowed_extensions is specified
             return Err(FileJackError::PermissionDenied(
                 "Files without extensions are not allowed".to_string()

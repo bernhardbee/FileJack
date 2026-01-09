@@ -1,7 +1,45 @@
 # Security Considerations for FileJack
 
 ## Overview
-This document outlines the comprehensive security measures implemented in FileJack to ensure safe file operations and prevent misuse.
+This document outlines the comprehensive security measures implemented in FileJack to ensure safe file operations and prevent misuse. **Version 0.1.0** includes critical security improvements addressing TOCTOU vulnerabilities, rate limiting, and enhanced logging.
+
+## Recent Security Improvements (v0.1.0)
+
+### ✅ Fixed Critical Vulnerabilities
+
+1. **TOCTOU (Time-of-Check-Time-of-Use) Vulnerability - FIXED**
+   - **Issue**: Previously, path validation occurred separately from file operations, creating a race condition window
+   - **Fix**: Implemented atomic file operations using file descriptors
+   - **Implementation**: 
+     - Files are opened first to obtain a file descriptor
+     - Validation is performed on the file descriptor metadata
+     - All operations use the already-opened file descriptor
+     - Prevents race conditions between validation and operation
+   - **Status**: ✅ Resolved in v0.1.0
+
+2. **Rate Limiting - IMPLEMENTED**
+   - **Issue**: No protection against DoS attacks through request flooding
+   - **Fix**: Implemented request rate limiting using `governor` crate
+   - **Configuration**: 
+     - Default: 100 requests/second (moderate)
+     - Configurable: strict (10/s), moderate (100/s), permissive (1000/s)
+   - **Status**: ✅ Implemented in v0.1.0
+
+3. **Path Canonicalization for Writes - FIXED**
+   - **Issue**: Write path validation could bypass security for non-existent files
+   - **Fix**: Improved validation reconstructs full canonical path including non-existent components
+   - **Implementation**: Tracks non-existent path components and validates complete reconstructed path
+   - **Status**: ✅ Resolved in v0.1.0
+
+4. **Structured Logging - IMPLEMENTED**
+   - **Issue**: Using `eprintln!` provided no structured audit trail
+   - **Fix**: Implemented comprehensive structured logging using `tracing` crate
+   - **Features**:
+     - Log levels: debug, info, warn, error
+     - Structured fields for security events
+     - File operation auditing
+     - Configurable via `RUST_LOG` environment variable
+   - **Status**: ✅ Implemented in v0.1.0
 
 ## Security Features
 
@@ -19,11 +57,20 @@ This document outlines the comprehensive security measures implemented in FileJa
 - **Base Path Enforcement**: When configured with a base path, all operations are restricted to that directory tree
 - **Validation Before Operations**: All file paths are validated before any read or write operations
 - **Denied Paths Precedence**: Denied paths take precedence over allowed paths to prevent bypass
+- **Atomic Operations**: Using file descriptors prevents TOCTOU race conditions
+- **Improved Write Path Validation**: Full path reconstruction for non-existent files prevents directory traversal
+
+### 3. Rate Limiting
+- **Request Rate Limiting**: Protects against DoS attacks through request flooding
+- **Configurable Limits**: Adjust rate limits based on deployment needs
+- **Per-Server Limiting**: Rate limiting applied to entire server instance
+- **Graceful Degradation**: Returns clear error messages when rate limit exceeded
 
 ### 3. Configuration Security
 - **Secure Defaults**: Restrictive defaults (no symlinks, no hidden files, limited file size)
 - **Configuration File Support**: JSON-based configuration for explicit security policies
-- **Environment Variable Fallback**: Support for basic restrictions via environment variables
+- **Structured Logging**: All errors are logged with structured fields for troubleshooting MCP integration issues
+- **Log Levels**: Different log levels (debug, info, warn, error) for appropriate error severity
 - **Validation on Load**: Configuration is validated when loaded from file
 
 ### 4. Error Information Disclosure
@@ -39,9 +86,20 @@ This document outlines the comprehensive security measures implemented in FileJa
 - **Parameter Validation**: Tool parameters are validated using serde for type safety
 - **Path Validation**: File paths are validated for existence, permissions, and policy compliance
 - **Extension Validation**: File extensions are checked against allowed/denied lists
+anyhow` & `thiserror`: Error handling libraries
+  - `tracing` & `tracing-subscriber`: Structured logging
+  - `walkdir`: Directory traversal
+  - `governor`: Rate limiting
+  - `tempfile`: For testing only (dev-dependency)
+- **Regular Updates**: Dependencies are kept up-to-date through automated CI/CD
+- **Security Auditing**: CI pipeline includes `cargo audit` for vulnerability scanning
 
-### 6. Memory Safety
-- **Rust's Memory Safety**: Leverages Rust's ownership system to prevent buffer overflows and memory corruption
+### 8. Continuous Integration
+- **Automated Testing**: Comprehensive test suite runs on every commit
+- **Security Test Suite**: Dedicated security tests verify protection against known attacks
+- **Static Analysis**: Clippy lints catch common security issues
+- **Dependency Auditing**: Automated vulnerability scanning with cargo-audit
+- **Multi-platform Testing**: Tests run on Linux and macOSrship system to prevent buffer overflows and memory corruption
 - **No Unsafe Code**: The entire codebase contains zero `unsafe` blocks
 - **Bounds Checking**: All array and vector accesses are bounds-checked by Rust
 

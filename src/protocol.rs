@@ -58,6 +58,40 @@ pub struct WriteFileParams {
     pub content: String,
 }
 
+/// List directory parameters
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListDirectoryParams {
+    pub path: String,
+    #[serde(default)]
+    pub recursive: bool,
+}
+
+/// Get metadata parameters
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetMetadataParams {
+    pub path: String,
+}
+
+/// Delete file parameters
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeleteFileParams {
+    pub path: String,
+}
+
+/// Move file parameters
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MoveFileParams {
+    pub from: String,
+    pub to: String,
+}
+
+/// Copy file parameters
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CopyFileParams {
+    pub from: String,
+    pub to: String,
+}
+
 impl JsonRpcResponse {
     pub fn success(id: Option<Value>, result: Value) -> Self {
         Self {
